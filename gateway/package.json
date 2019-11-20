@@ -1,0 +1,25 @@
+{
+  "name": "web-bluetooth-arduino",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "serve": "vue-cli-service serve",
+    "build": "vue-cli-service build"
+  },
+  "dependencies": {
+    "@fullhuman/postcss-purgecss": "^1.3.0",
+    "core-js": "^3.3.2",
+    "register-service-worker": "^1.6.2",
+    "tailwindcss": "^1.1.3",
+    "vue": "^2.6.10",
+    "vue-router": "^3.1.3",
+    "vue-tailwind": "^0.4.2"
+  },
+  "devDependencies": {
+    "@vue/cli-plugin-babel": "^4.0.0",
+    "@vue/cli-plugin-pwa": "^4.0.0",
+    "@vue/cli-plugin-router": "^4.0.0",
+    "@vue/cli-service": "^4.0.0",
+    "vue-template-compiler": "^2.6.10"
+  }
+}
