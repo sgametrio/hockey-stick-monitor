@@ -1,0 +1,7 @@
+{
+    "target_overrides": {
+        "NRF52840_DK": {
+            "target.mbed_app_start": "0x10000"
+        }
+    }
+}
