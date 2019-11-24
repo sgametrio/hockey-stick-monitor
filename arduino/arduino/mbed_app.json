@@ -1,6 +1,6 @@
 {
     "target_overrides": {
-        "NRF52840_DK": {
+        "ARDUINO_NANO33BLE": {
             "target.mbed_app_start": "0x10000"
         }
     }

@@ -1,2 +1,4 @@
-arduino/arduino/mbed-os/*
-arduino/arduino/BUILD/*
+arduino/arduino/mbed-os/
+arduino/arduino/BUILD/
+.DS_Store
+arduino/arduino/LSM9DS1/.hg/

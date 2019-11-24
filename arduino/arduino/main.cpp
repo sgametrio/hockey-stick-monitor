@@ -14,6 +14,12 @@
  * limitations under the License.
  */
 
+
+// =================
+// UNCOMMENT THE FOLLOWING LINE TO GET DEBUG OUTPUT ON THE USB SERIAL INTERFACE
+#define DEBUG
+// =================
+
 #include <stdio.h>
 
 #include "platform/Callback.h"
@@ -28,45 +34,43 @@
 #include "ble/GattServer.h"
 #include "BLEProcess.h"
 
+#include "LSM9DS1.h"
+
+#include "USBSerial.h"
+
 using mbed::callback;
 
-/**
- * A Clock service that demonstrate the GattServer features.
- *
- * The clock service host three characteristics that model the current hour,
- * minute and second of the clock. The value of the second characteristic is
- * incremented automatically by the system.
- *
- * A client can subscribe to updates of the clock characteristics and get
- * notified when one of the value is changed. Clients can also change value of
- * the second, minute and hour characteristric.
- */
-class ClockService {
-    typedef ClockService Self;
+#ifdef DEBUG
+    USBSerial pc;
+#endif DEBUG
+
+DigitalOut i2c_pullup(P1_0);
+DigitalOut i2c_vdd_enable(P0_22);
+
+
+class HockeyService {
+    typedef HockeyService Self;
 
 public:
-    ClockService() :
-        _hour_char("485f4145-52b9-4644-af1f-7a6b9322490f", 0),
-        _minute_char("0a924ca7-87cd-4699-a3bd-abdcd9cf126a", 0),
-        _second_char("8dd6a1b7-bc75-4741-8a26-264af75807de", 0),
-        _clock_service(
-            /* uuid */ "51311102-030e-485f-b122-f8f381aa84ed",
-            /* characteristics */ _clock_characteristics,
-            /* numCharacteristics */ sizeof(_clock_characteristics) /
-                                     sizeof(_clock_characteristics[0])
+    HockeyService(LSM9DS1 arduino_imu) :
+        _management_characterisic("5143d572-0dcf-11ea-8d71-362b9e155667", 0),
+        _data_characterisic("2541489a-0dd1-11ea-8d71-362b9e155667"),
+        _hockey_service(
+            /* uuid */ "6a0a5c16-0dcf-11ea-8d71-362b9e155667",
+            /* characteristics */ _characteristics,
+            /* numCharacteristics */ sizeof(_characteristics) /
+                                     sizeof(_characteristics[0])
         ),
         _server(NULL),
-        _event_queue(NULL)
+        _event_queue(NULL),
+        _arduino_imu(arduino_imu)
     {
         // update internal pointers (value, descriptors and characteristics array)
-        _clock_characteristics[0] = &_hour_char;
-        _clock_characteristics[1] = &_minute_char;
-        _clock_characteristics[2] = &_second_char;
+        _characteristics[0] = &_management_characterisic;
+        _characteristics[1] = &_data_characterisic;
 
-        // setup authorization handlers
-        _hour_char.setWriteAuthorizationCallback(this, &Self::authorize_client_write);
-        _minute_char.setWriteAuthorizationCallback(this, &Self::authorize_client_write);
-        _second_char.setWriteAuthorizationCallback(this, &Self::authorize_client_write);
+        // setup authorization handlers for write-enable characteristics
+        _management_characterisic.setWriteAuthorizationCallback(this, &Self::authorize_client_write);
     }
 
 
@@ -81,11 +85,15 @@ public:
         _event_queue = &event_queue;
 
         // register the service
-        printf("Adding demo service\r\n");
-        ble_error_t err = _server->addService(_clock_service);
+        #ifdef DEBUG
+            pc.printf("Adding hockey service\r\n");
+        #endif
+        ble_error_t err = _server->addService(_hockey_service);
 
         if (err) {
-            printf("Error %u during demo service registration.\r\n", err);
+            #ifdef DEBUG
+                pc.printf("Error %u during demo service registration.\r\n", err);
+            #endif
             return;
         }
 
@@ -99,14 +107,13 @@ public:
         _server->onUpdatesDisabled(as_cb(&Self::when_update_disabled));
         _server->onConfirmationReceived(as_cb(&Self::when_confirmation_received));
 
-        // print the handles
-        printf("clock service registered\r\n");
-        printf("service handle: %u\r\n", _clock_service.getHandle());
-        printf("\thour characteristic value handle %u\r\n", _hour_char.getValueHandle());
-        printf("\tminute characteristic value handle %u\r\n", _minute_char.getValueHandle());
-        printf("\tsecond characteristic value handle %u\r\n", _second_char.getValueHandle());
-
-        _event_queue->call_every(1000 /* ms */, callback(this, &Self::increment_second));
+        #ifdef DEBUG
+            // print the handles
+            pc.printf("clock service registered\r\n");
+            pc.printf("service handle: %u\r\n", _hockey_service.getHandle());
+            pc.printf("\tmanagement characteristic value handle %u\r\n", _management_characterisic.getValueHandle());
+            pc.printf("\tdata characteristic value handle %u\r\n", _data_characterisic.getValueHandle());
+        #endif
     }
 
 private:
@@ -116,7 +123,9 @@ private:
      */
     void when_data_sent(unsigned count)
     {
-        printf("sent %u updates\r\n", count);
+        #ifdef DEBUG
+            pc.printf("sent %u updates\r\n", count);
+        #endif
     }
 
     /**
@@ -124,28 +133,34 @@ private:
      */
     void when_data_written(const GattWriteCallbackParams *e)
     {
-        printf("data written:\r\n");
-        printf("\tconnection handle: %u\r\n", e->connHandle);
-        printf("\tattribute handle: %u", e->handle);
-        if (e->handle == _hour_char.getValueHandle()) {
-            printf(" (hour characteristic)\r\n");
-        } else if (e->handle == _minute_char.getValueHandle()) {
-            printf(" (minute characteristic)\r\n");
-        } else if (e->handle == _second_char.getValueHandle()) {
-            printf(" (second characteristic)\r\n");
-        } else {
-            printf("\r\n");
-        }
-        printf("\twrite operation: %u\r\n", e->writeOp);
-        printf("\toffset: %u\r\n", e->offset);
-        printf("\tlength: %u\r\n", e->len);
-        printf("\t data: ");
+        #ifdef DEBUG
+            pc.printf("data written:\r\n");
+            pc.printf("\tconnection handle: %u\r\n", e->connHandle);
+            pc.printf("\tattribute handle: %u", e->handle);
+        #endif
 
-        for (size_t i = 0; i < e->len; ++i) {
-            printf("%02X", e->data[i]);
+        if (e->handle == _management_characterisic.getValueHandle()) {
+            if (e->data[0] == 1) {
+                // Start recording from sensors
+                _periodic_read_sensors_id = _event_queue->call_every(500 /* ms */, callback(this, &Self::read_sensors));
+            } else if (e->data[0] == 0) {
+                // Stop recording from sensors
+                _event_queue->cancel(_periodic_read_sensors_id);
+            }
         }
 
-        printf("\r\n");
+        #ifdef DEBUG
+            pc.printf("\twrite operation: %u\r\n", e->writeOp);
+            pc.printf("\toffset: %u\r\n", e->offset);
+            pc.printf("\tlength: %u\r\n", e->len);
+            pc.printf("\t data: ");
+
+            for (size_t i = 0; i < e->len; ++i) {
+                pc.printf("%02X", e->data[i]);
+            }
+
+            pc.printf("\r\n");
+        #endif
     }
 
     /**
@@ -153,18 +168,18 @@ private:
      */
     void when_data_read(const GattReadCallbackParams *e)
     {
-        printf("data read:\r\n");
-        printf("\tconnection handle: %u\r\n", e->connHandle);
-        printf("\tattribute handle: %u", e->handle);
-        if (e->handle == _hour_char.getValueHandle()) {
-            printf(" (hour characteristic)\r\n");
-        } else if (e->handle == _minute_char.getValueHandle()) {
-            printf(" (minute characteristic)\r\n");
-        } else if (e->handle == _second_char.getValueHandle()) {
-            printf(" (second characteristic)\r\n");
-        } else {
-            printf("\r\n");
-        }
+        #ifdef DEBUG
+            pc.printf("data read:\r\n");
+            pc.printf("\tconnection handle: %u\r\n", e->connHandle);
+            pc.printf("\tattribute handle: %u", e->handle);
+            if (e->handle == _management_characterisic.getValueHandle()) {
+                pc.printf(" (management characteristic)\r\n");
+            } else if (e->handle == _data_characterisic.getValueHandle()) {
+                pc.printf(" (data characteristic)\r\n");
+            } else {
+                pc.printf("\r\n");
+            }
+        #endif
     }
 
     /**
@@ -174,7 +189,9 @@ private:
      */
     void when_update_enabled(GattAttribute::Handle_t handle)
     {
-        printf("update enabled on handle %d\r\n", handle);
+        #ifdef DEBUG
+            pc.printf("update enabled on handle %d\r\n", handle);
+        #endif
     }
 
     /**
@@ -185,7 +202,9 @@ private:
      */
     void when_update_disabled(GattAttribute::Handle_t handle)
     {
-        printf("update disabled on handle %d\r\n", handle);
+        #ifdef DEBUG
+            pc.printf("update disabled on handle %d\r\n", handle);
+        #endif
     }
 
     /**
@@ -196,7 +215,9 @@ private:
      */
     void when_confirmation_received(GattAttribute::Handle_t handle)
     {
-        printf("confirmation received on handle %d\r\n", handle);
+        #ifdef DEBUG
+            pc.printf("confirmation received on handle %d\r\n", handle);
+        #endif
     }
 
     /**
@@ -207,100 +228,51 @@ private:
      */
     void authorize_client_write(GattWriteAuthCallbackParams *e)
     {
-        printf("characteristic %u write authorization\r\n", e->handle);
+        #ifdef DEBUG
+            pc.printf("characteristic %u write authorization\r\n", e->handle);
+        #endif
 
-        if (e->offset != 0) {
-            printf("Error invalid offset\r\n");
+        if (e->offset != 0) {      
+            #ifdef DEBUG
+                pc.printf("Error invalid offset\r\n");
+            #endif
             e->authorizationReply = AUTH_CALLBACK_REPLY_ATTERR_INVALID_OFFSET;
             return;
         }
 
         if (e->len != 1) {
-            printf("Error invalid len\r\n");
+            #ifdef DEBUG
+                pc.printf("Error invalid len\r\n");
+            #endif
             e->authorizationReply = AUTH_CALLBACK_REPLY_ATTERR_INVALID_ATT_VAL_LENGTH;
-            return;
-        }
-
-        if ((e->data[0] >= 60) ||
-            ((e->data[0] >= 24) && (e->handle == _hour_char.getValueHandle()))) {
-            printf("Error invalid data\r\n");
-            e->authorizationReply = AUTH_CALLBACK_REPLY_ATTERR_WRITE_NOT_PERMITTED;
             return;
         }
 
         e->authorizationReply = AUTH_CALLBACK_REPLY_SUCCESS;
     }
 
-    /**
-     * Increment the second counter.
-     */
-    void increment_second(void)
-    {
-        uint8_t second = 0;
-        ble_error_t err = _second_char.get(*_server, second);
-        if (err) {
-            printf("read of the second value returned error %u\r\n", err);
-            return;
-        }
+    void read_sensors() {
+        _arduino_imu.readAccel();
+        uint8_t buffer[12];
+        memcpy(buffer,   (uint8_t*)(&_arduino_imu.ax), 4); // original datatype is float
+        memcpy(buffer+4, (uint8_t*)(&_arduino_imu.ay), 4); // original datatype is float
+        memcpy(buffer+8, (uint8_t*)(&_arduino_imu.az), 4); // original datatype is float
+        
+        #ifdef DEBUG
+            pc.printf("Array of data from internal IMU: \r\n");
+            for (int i = 0; i < 12; i++)
+                pc.printf("%u ", buffer[i]);
+            pc.printf("\r\n");
+        #endif
 
-        second = (second + 1) % 60;
-
-        err = _second_char.set(*_server, second);
-        if (err) {
-            printf("write of the second value returned error %u\r\n", err);
-            return;
-        }
-
-        if (second == 0) {
-            increment_minute();
-        }
+        ble_error_t err = _data_characterisic.set_buffer(*_server, buffer, sizeof(buffer));
+        #ifdef DEBUG
+            if (err) {
+                pc.printf("write of values returned error %u\r\n", err);
+            }
+        #endif
     }
 
-    /**
-     * Increment the minute counter.
-     */
-    void increment_minute(void)
-    {
-        uint8_t minute = 0;
-        ble_error_t err = _minute_char.get(*_server, minute);
-        if (err) {
-            printf("read of the minute value returned error %u\r\n", err);
-            return;
-        }
-
-        minute = (minute + 1) % 60;
-
-        err = _minute_char.set(*_server, minute);
-        if (err) {
-            printf("write of the minute value returned error %u\r\n", err);
-            return;
-        }
-
-        if (minute == 0) {
-            increment_hour();
-        }
-    }
-
-    /**
-     * Increment the hour counter.
-     */
-    void increment_hour(void)
-    {
-        uint8_t hour = 0;
-        ble_error_t err = _hour_char.get(*_server, hour);
-        if (err) {
-            printf("read of the hour value returned error %u\r\n", err);
-            return;
-        }
-
-        hour = (hour + 1) % 24;
-
-        err = _hour_char.set(*_server, hour);
-        if (err) {
-            printf("write of the hour value returned error %u\r\n", err);
-            return;
-        }
-    }
 
 private:
     /**
@@ -378,28 +350,101 @@ private:
         uint8_t _value;
     };
 
-    ReadWriteNotifyIndicateCharacteristic<uint8_t> _hour_char;
-    ReadWriteNotifyIndicateCharacteristic<uint8_t> _minute_char;
-    ReadWriteNotifyIndicateCharacteristic<uint8_t> _second_char;
+    /**
+     * Read, Notify, Indicate  Characteristic declaration helper.
+     *
+     */
+    class ReadNotifyIndicateCharacteristic : public GattCharacteristic {
+    public:
+        /**
+         * Construct a characteristic that can be read and emit
+         * notification or indication.
+         *
+         * @param[in] uuid The UUID of the characteristic.
+         * @param[in] initial_value Initial value contained by the characteristic.
+         */
+        ReadNotifyIndicateCharacteristic(const UUID & uuid) :
+            GattCharacteristic(
+                /* UUID */ uuid,
+                /* Initial value */ _buffer,
+                /* Value size */ sizeof(_buffer),
+                /* Value capacity */ sizeof(_buffer),
+                /* Properties */ GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ |
+                                GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY |
+                                GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_INDICATE,
+                /* Descriptors */ NULL,
+                /* Num descriptors */ 0,
+                /* variable len */ false
+            ) {}
 
-    // list of the characteristics of the clock service
-    GattCharacteristic* _clock_characteristics[3];
+        ble_error_t set_buffer(
+            GattServer &server, uint8_t* buffer, uint16_t length, bool local_only = false
+        ) const {
+            return server.write(getValueHandle(), buffer, length, local_only);
+        }
 
-    // demo service
-    GattService _clock_service;
+    private:
+        uint8_t _buffer[12];
+    };
+
+
+    ReadWriteNotifyIndicateCharacteristic<uint8_t> _management_characterisic;
+    ReadNotifyIndicateCharacteristic _data_characterisic;
+
+    // list of the characteristics of the service
+    GattCharacteristic* _characteristics[2];
+
+    // service
+    GattService _hockey_service;
+
+    // to keep the id of the scheduled periodic read_sensors()
+    int _periodic_read_sensors_id;
 
     GattServer* _server;
     events::EventQueue *_event_queue;
+
+    // Reference to Arduino's internal IMU
+    LSM9DS1 _arduino_imu;
 };
 
+
+void fixNano33BLE() {
+    // Needed on Nano 33 BLE, don't ask why
+    CoreDebug->DEMCR = 0;
+    NRF_CLOCK->TRACECONFIG = 0;
+}
+
+void initInternalI2C_Nano33BLE() {
+    i2c_pullup = 1;
+    i2c_vdd_enable = 1;
+}
+
+LSM9DS1 getInternalIMU() {
+    LSM9DS1 imu(P0_14, P0_15); // these are internal SDA and SCL pins
+    imu.begin();
+    bool result = imu.begin(); // call twice, don't ask me why
+    #ifdef DEBUG
+        pc.printf("Result of imu initialization: %u\n", result);
+    #endif
+    //imu.calibration();
+    #ifdef DEBUG
+        pc.printf("IMU calibration completed.\r\n");
+    #endif
+
+    return imu;
+}
+
 int main() {
+    fixNano33BLE();
+    initInternalI2C_Nano33BLE();
+
+    LSM9DS1 imu = getInternalIMU();
+
     BLE &ble_interface = BLE::Instance();
     events::EventQueue event_queue;
-    ClockService demo_service;
+    HockeyService hockey_service(imu);
     BLEProcess ble_process(event_queue, ble_interface);
-
-    ble_process.on_init(callback(&demo_service, &ClockService::start));
-
+    ble_process.on_init(callback(&hockey_service, &HockeyService::start));
     // bind the event queue to the ble interface, initialize the interface
     // and start advertising
     ble_process.start();

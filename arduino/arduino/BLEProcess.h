@@ -18,7 +18,7 @@
 #define GATT_SERVER_EXAMPLE_BLE_PROCESS_H_
 
 #include <stdint.h>
-#include <stdio.h>
+//#include <stdio.h>
 
 #include "events/EventQueue.h"
 #include "platform/Callback.h"
@@ -70,10 +70,10 @@ public:
      */
     bool start()
     {
-        printf("Ble process started.\r\n");
+        //printf("Ble process started.\r\n");
 
         if (_ble_interface.hasInitialized()) {
-            printf("Error: the ble instance has already been initialized.\r\n");
+            //printf("Error: the ble instance has already been initialized.\r\n");
             return false;
         }
 
@@ -86,7 +86,7 @@ public:
         );
 
         if (error) {
-            printf("Error: %u returned by BLE::init.\r\n", error);
+            // printf("Error: %u returned by BLE::init.\r\n", error);
             return false;
         }
 
@@ -100,7 +100,7 @@ public:
     {
         if (_ble_interface.hasInitialized()) {
             _ble_interface.shutdown();
-            printf("Ble process stopped.");
+            //printf("Ble process stopped.");
         }
     }
 
@@ -122,10 +122,10 @@ private:
     void when_init_complete(BLE::InitializationCompleteCallbackContext *event)
     {
         if (event->error) {
-            printf("Error %u during the initialization\r\n", event->error);
+            //printf("Error %u during the initialization\r\n", event->error);
             return;
         }
-        printf("Ble instance initialized\r\n");
+        //printf("Ble instance initialized\r\n");
 
         Gap &gap = _ble_interface.gap();
         gap.onConnection(this, &BLEProcess::when_connection);
@@ -150,12 +150,12 @@ private:
 
     void when_connection(const Gap::ConnectionCallbackParams_t *connection_event)
     {
-        printf("Connected.\r\n");
+        //printf("Connected.\r\n");
     }
 
     void when_disconnection(const Gap::DisconnectionCallbackParams_t *event)
     {
-        printf("Disconnected.\r\n");
+        //printf("Disconnected.\r\n");
         start_advertising();
     }
 
@@ -167,10 +167,10 @@ private:
         ble_error_t error = gap.startAdvertising(ble::LEGACY_ADVERTISING_HANDLE);
 
         if (error) {
-            printf("Error %u during gap.startAdvertising.\r\n", error);
+            //printf("Error %u during gap.startAdvertising.\r\n", error);
             return false;
         } else {
-            printf("Advertising started.\r\n");
+            //printf("Advertising started.\r\n");
             return true;
         }
     }
@@ -185,7 +185,7 @@ private:
         );
 
         if (error) {
-            printf("Gap::setAdvertisingParameters() failed with error %d", error);
+            //printf("Gap::setAdvertisingParameters() failed with error %d", error);
             return false;
         }
 
@@ -202,12 +202,12 @@ private:
             ble::LEGACY_ADVERTISING_HANDLE,
             ble::AdvertisingDataSimpleBuilder<ble::LEGACY_ADVERTISING_MAX_SIZE>()
                 .setFlags()
-                .setName("GattServer")
+                .setName("ArduinoHockeyBLEServer")
                 .getAdvertisingData()
         );
 
         if (error) {
-            printf("Gap::setAdvertisingPayload() failed with error %d", error);
+            //printf("Gap::setAdvertisingPayload() failed with error %d", error);
             return false;
         }
 
