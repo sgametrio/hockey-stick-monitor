@@ -34,8 +34,6 @@
 #include "ble/GattServer.h"
 #include "BLEProcess.h"
 
-#include "LSM9DS1.h"
-
 #include "USBSerial.h"
 
 using mbed::callback;
@@ -44,15 +42,18 @@ using mbed::callback;
     USBSerial pc;
 #endif DEBUG
 
+#include "LSM9DS1.h"
+#include "MPU6050.h"
+
+
 DigitalOut i2c_pullup(P1_0);
 DigitalOut i2c_vdd_enable(P0_22);
-
 
 class HockeyService {
     typedef HockeyService Self;
 
 public:
-    HockeyService(LSM9DS1 arduino_imu) :
+    HockeyService(LSM9DS1 arduino_imu, MPU6050 external_imu) :
         _management_characterisic("5143d572-0dcf-11ea-8d71-362b9e155667", 0),
         _data_characterisic("2541489a-0dd1-11ea-8d71-362b9e155667"),
         _hockey_service(
@@ -63,7 +64,8 @@ public:
         ),
         _server(NULL),
         _event_queue(NULL),
-        _arduino_imu(arduino_imu)
+        _arduino_imu(arduino_imu),
+        _external_imu(external_imu)
     {
         // update internal pointers (value, descriptors and characteristics array)
         _characteristics[0] = &_management_characterisic;
@@ -252,14 +254,38 @@ private:
     }
 
     void read_sensors() {
+        uint8_t buffer[2 * 6 * 4];
+
+        // Internal IMU
         _arduino_imu.readAccel();
-        uint8_t buffer[12];
-        memcpy(buffer,   (uint8_t*)(&_arduino_imu.ax), 4); // original datatype is float
-        memcpy(buffer+4, (uint8_t*)(&_arduino_imu.ay), 4); // original datatype is float
-        memcpy(buffer+8, (uint8_t*)(&_arduino_imu.az), 4); // original datatype is float
+        _arduino_imu.readGyro();
+        memcpy(buffer,    (uint8_t*)(&_arduino_imu.ax), 4); // original datatype is float
+        memcpy(buffer+4,  (uint8_t*)(&_arduino_imu.ay), 4);
+        memcpy(buffer+8,  (uint8_t*)(&_arduino_imu.az), 4); 
+        memcpy(buffer+12, (uint8_t*)(&_arduino_imu.gx), 4);
+        memcpy(buffer+16, (uint8_t*)(&_arduino_imu.gy), 4);
+        memcpy(buffer+20, (uint8_t*)(&_arduino_imu.gz), 4);
+
+        // External IMU
+        _external_imu.readAccelData(accelCount);
+        float ax = (float)accelCount[0]*aRes - accelBias[0];  // get actual g value, this depends on scale being set
+        float ay = (float)accelCount[1]*aRes - accelBias[1];   
+        float az = (float)accelCount[2]*aRes - accelBias[2];
+        _external_imu.readGyroData(gyroCount);  // Read the x/y/z adc values
+        _external_imu.getGres();
+        float gx = (float)gyroCount[0]*gRes; // - gyroBias[0];  // get actual gyro value, this depends on scale being set
+        float gy = (float)gyroCount[1]*gRes; // - gyroBias[1];  
+        float gz = (float)gyroCount[2]*gRes; // - gyroBias[2];   
+        memcpy(buffer+24, (uint8_t*)(&ax), 4); // original datatype is float
+        memcpy(buffer+28, (uint8_t*)(&ay), 4);
+        memcpy(buffer+32, (uint8_t*)(&az), 4); 
+        memcpy(buffer+36, (uint8_t*)(&gx), 4); 
+        memcpy(buffer+40, (uint8_t*)(&gy), 4);
+        memcpy(buffer+44, (uint8_t*)(&gz), 4);
         
         #ifdef DEBUG
-            pc.printf("Array of data from internal IMU: \r\n");
+            pc.printf("Acceleration data from internal IMU now being sent: \r\n");
+            pc.printf("ax: %f, ay: %f, az: %f\r\n", _arduino_imu.ax, _arduino_imu.ay, _arduino_imu.az);
             for (int i = 0; i < 12; i++)
                 pc.printf("%u ", buffer[i]);
             pc.printf("\r\n");
@@ -384,7 +410,7 @@ private:
         }
 
     private:
-        uint8_t _buffer[12];
+        uint8_t _buffer[2 * 6 * 4];
     };
 
 
@@ -405,6 +431,9 @@ private:
 
     // Reference to Arduino's internal IMU
     LSM9DS1 _arduino_imu;
+
+    // Reference to external IMU
+    MPU6050 _external_imu;
 };
 
 
@@ -424,13 +453,9 @@ LSM9DS1 getInternalIMU() {
     imu.begin();
     bool result = imu.begin(); // call twice, don't ask me why
     #ifdef DEBUG
-        pc.printf("Result of imu initialization: %u\n", result);
+        pc.printf("Result of imu initialization: %u\r\n", result);
     #endif
-    //imu.calibration();
-    #ifdef DEBUG
-        pc.printf("IMU calibration completed.\r\n");
-    #endif
-
+    //imu.calibration(); // often hangs
     return imu;
 }
 
@@ -439,10 +464,14 @@ int main() {
     initInternalI2C_Nano33BLE();
 
     LSM9DS1 imu = getInternalIMU();
+    MPU6050 mpu6050;
+    mpu6050.resetMPU6050();
+    mpu6050.calibrateMPU6050(gyroBias, accelBias);
+    mpu6050.initMPU6050();
 
     BLE &ble_interface = BLE::Instance();
     events::EventQueue event_queue;
-    HockeyService hockey_service(imu);
+    HockeyService hockey_service(imu, mpu6050);
     BLEProcess ble_process(event_queue, ble_interface);
     ble_process.on_init(callback(&hockey_service, &HockeyService::start));
     // bind the event queue to the ble interface, initialize the interface
