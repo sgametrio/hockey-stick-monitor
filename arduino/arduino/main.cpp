@@ -71,6 +71,8 @@ public:
         _characteristics[0] = &_management_characterisic;
         _characteristics[1] = &_data_characterisic;
 
+        _periodic_read_sensors_id = 0;
+
         // setup authorization handlers for write-enable characteristics
         _management_characterisic.setWriteAuthorizationCallback(this, &Self::authorize_client_write);
     }
@@ -143,11 +145,16 @@ private:
 
         if (e->handle == _management_characterisic.getValueHandle()) {
             if (e->data[0] == 1) {
-                // Start recording from sensors
-                _periodic_read_sensors_id = _event_queue->call_every(500 /* ms */, callback(this, &Self::read_sensors));
+                // Start recording from sensors, if we are not currently recording
+                if (_periodic_read_sensors_id == 0) {
+                    _periodic_read_sensors_id = _event_queue->call_every(500 /* ms */, callback(this, &Self::read_sensors));
+                }
             } else if (e->data[0] == 0) {
-                // Stop recording from sensors
-                _event_queue->cancel(_periodic_read_sensors_id);
+                // Stop recording from sensors, if we are actually recording
+                if (_periodic_read_sensors_id > 0) {
+                    _event_queue->cancel(_periodic_read_sensors_id);
+                    _periodic_read_sensors_id = 0;
+                }
             }
         }
 
