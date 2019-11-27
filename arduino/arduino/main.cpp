@@ -49,6 +49,8 @@ using mbed::callback;
 DigitalOut i2c_pullup(P1_0);
 DigitalOut i2c_vdd_enable(P0_22);
 
+#define BLE_DATA_PACKET_LEN 13
+
 class HockeyService {
     typedef HockeyService Self;
 
@@ -261,17 +263,22 @@ private:
     }
 
     void read_sensors() {
-        uint8_t buffer[2 * 6 * 4];
+        uint8_t buffer[BLE_DATA_PACKET_LEN];
 
         // Internal IMU
         _arduino_imu.readAccel();
         _arduino_imu.readGyro();
-        memcpy(buffer,    (uint8_t*)(&_arduino_imu.ax), 4); // original datatype is float
-        memcpy(buffer+4,  (uint8_t*)(&_arduino_imu.ay), 4);
-        memcpy(buffer+8,  (uint8_t*)(&_arduino_imu.az), 4); 
-        memcpy(buffer+12, (uint8_t*)(&_arduino_imu.gx), 4);
-        memcpy(buffer+16, (uint8_t*)(&_arduino_imu.gy), 4);
-        memcpy(buffer+20, (uint8_t*)(&_arduino_imu.gz), 4);
+        buffer[0] = 0x01;
+        memcpy(buffer+1,   (uint8_t*)(&_arduino_imu.ax), 4); // original datatype is float
+        memcpy(buffer+1+4, (uint8_t*)(&_arduino_imu.ay), 4);
+        memcpy(buffer+1+8, (uint8_t*)(&_arduino_imu.az), 4);
+        send_buffer(buffer, BLE_DATA_PACKET_LEN);
+
+        buffer[0] = 0x02;
+        memcpy(buffer+1,   (uint8_t*)(&_arduino_imu.gx), 4);
+        memcpy(buffer+1+4, (uint8_t*)(&_arduino_imu.gy), 4);
+        memcpy(buffer+1+8, (uint8_t*)(&_arduino_imu.gz), 4);
+        send_buffer(buffer, BLE_DATA_PACKET_LEN);
 
         // External IMU
         _external_imu.readAccelData(accelCount);
@@ -282,24 +289,29 @@ private:
         _external_imu.getGres();
         float gx = (float)gyroCount[0]*gRes; // - gyroBias[0];  // get actual gyro value, this depends on scale being set
         float gy = (float)gyroCount[1]*gRes; // - gyroBias[1];  
-        float gz = (float)gyroCount[2]*gRes; // - gyroBias[2];   
-        memcpy(buffer+24, (uint8_t*)(&ax), 4); // original datatype is float
-        memcpy(buffer+28, (uint8_t*)(&ay), 4);
-        memcpy(buffer+32, (uint8_t*)(&az), 4); 
-        memcpy(buffer+36, (uint8_t*)(&gx), 4); 
-        memcpy(buffer+40, (uint8_t*)(&gy), 4);
-        memcpy(buffer+44, (uint8_t*)(&gz), 4);
-        
+        float gz = (float)gyroCount[2]*gRes; // - gyroBias[2];
+
+        buffer[0] = 0x03;
+        memcpy(buffer+1,   (uint8_t*)(&ax), 4); // original datatype is float
+        memcpy(buffer+1+4, (uint8_t*)(&ay), 4);
+        memcpy(buffer+1+8, (uint8_t*)(&az), 4);
+        send_buffer(buffer, BLE_DATA_PACKET_LEN);
+
+        buffer[0] = 0x04;
+        memcpy(buffer+1,   (uint8_t*)(&gx), 4);
+        memcpy(buffer+1+4, (uint8_t*)(&gy), 4);
+        memcpy(buffer+1+8, (uint8_t*)(&gz), 4);
+        send_buffer(buffer, BLE_DATA_PACKET_LEN);
+
+    }
+
+    void send_buffer(uint8_t* buffer, uint16_t len) {
+        ble_error_t err = _data_characterisic.set_buffer(*_server, buffer, len);
         #ifdef DEBUG
-            pc.printf("Acceleration data from internal IMU now being sent: \r\n");
-            pc.printf("ax: %f, ay: %f, az: %f\r\n", _arduino_imu.ax, _arduino_imu.ay, _arduino_imu.az);
-            for (int i = 0; i < 12; i++)
+            pc.printf("Data being sent: \r\n");
+            for (int i = 0; i < BLE_DATA_PACKET_LEN; i++)
                 pc.printf("%u ", buffer[i]);
             pc.printf("\r\n");
-        #endif
-
-        ble_error_t err = _data_characterisic.set_buffer(*_server, buffer, sizeof(buffer));
-        #ifdef DEBUG
             if (err) {
                 pc.printf("write of values returned error %u\r\n", err);
             }
@@ -417,7 +429,7 @@ private:
         }
 
     private:
-        uint8_t _buffer[2 * 6 * 4];
+        uint8_t _buffer[BLE_DATA_PACKET_LEN];
     };
 
 
