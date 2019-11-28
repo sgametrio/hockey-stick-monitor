@@ -24,7 +24,7 @@
                 <color-svg :class="[ (recordings[i]) ? 'border-gray-100 text-gray-500 bg-gray-100' : 'border-teal-200 text-teal-500 bg-teal-100 hover:bg-teal-200']"
                            class="border p-1 pl-2 rounded-full h-8 w-8 shadow" stroke=2 fill=true 
                            icon="play" @click.native="startRecording(i)"/>
-                <span class="text-xs mx-1">{{valuesFromArduinos[i][valuesFromArduinos[i].length - 1]}}</span>
+                <!-- <span class="text-xs mx-1">{{values[i][values[i].length - 1]}}</span> -->
                 <color-svg :class="[ (!recordings[i]) ? 'border-gray-100 text-gray-500 bg-gray-100' : 'border-yellow-200 text-yellow-500 bg-yellow-100 hover:bg-yellow-200']"
                            class="border p-1 rounded-full h-8 w-8 shadow" stroke=1 fill=true 
                            icon="pause" @click.native="stopRecording(i)"/>
@@ -39,25 +39,6 @@
             </div>
           </div>
         </div>
-        <!-- <input class="text-blue-700 text-md bg-blue-100 shadow px-3 py-2 border-blue-200 border-2 rounded-lg m-3
-                      hover:bg-blue-200 hover:shadow-md" 
-               v-if="!(arduino && characteristic) && !loading" type="button" @click="connectToArduino" value="Connect to Arduino"/>
-        <template v-else>
-          <div class="mt-5">
-            <loading-spinner class="p-3" v-if="loading"/>
-            <div v-else @click="changeRecordingState">
-              <color-svg v-if="!recording" class="border-2 border-purple-200 text-purple-500 bg-purple-100 hover:bg-purple-200 p-3 pl-4 rounded-full h-20 w-20 shadow" stroke=2 fill=true icon="play"/>
-              <color-svg v-else class="border-2 border-yellow-200 text-yellow-500 bg-yellow-100 hover:bg-yellow-200 p-3 rounded-full h-20 w-20 shadow" stroke=1 fill=true icon="pause"/>
-            </div>
-          </div>
-          <div class="max-w-full min-w-full h-24">
-            <div class="flex flex-wrap">
-              <div class="p-1" v-for="(val, i) in readValues" :key="i">
-                {{ val }}&nbsp;
-              </div>
-            </div>
-          </div>
-        </template> -->
       </div>
     </div>    
   </div>
@@ -67,6 +48,7 @@
 import { log } from "@/components/console"
 import ColorSvg from "@/components/ColorSvg"
 import LoadingSpinner from "@/components/LoadingSpinner"
+import { mapping } from "@/components/sensors"
 
 export default {
   name: 'home',
@@ -77,43 +59,57 @@ export default {
   data: function () {
     return {
       arduinos: [],
-      serviceUuid: "0xabc0",
-      characteristicUuid: "0xabc1",
-      characteristics: [],
-      valuesFromArduinos: [],
+      serviceUuid: "6a0a5c16-0dcf-11ea-8d71-362b9e155667",
+      managementUuid: "5143d572-0dcf-11ea-8d71-362b9e155667",
+      valuesUuid: "2541489a-0dd1-11ea-8d71-362b9e155667",
+      managements: [],
+      valuesCharacteristics: [],
+      values: [],
       recordings: [],
       loading: false,
+      counter: 0
     }
   },
   computed: {},
   mounted() {},
+  beforeDestroy() {
+    // ensure that I remove event listeners on characteristics
+    for (let [characteristic, i] of this.valuesCharacteristics) {
+      characteristic.removeEventListener('characteristicvaluechanged', (event) => this.appendReadValue(event, i), { passive: true })
+    }
+  },
   methods: {
     async connectToArduino() {
       this.loading = true
-      const serviceUuidInt = parseInt(this.serviceUuid)
-      const characteristicUuidInt = parseInt(this.characteristicUuid)
 
       try {
         log('Requesting Bluetooth Device...')
         const arduino = await navigator.bluetooth.requestDevice({
-          filters: [{services: [serviceUuidInt]}]
+          filters: [{
+            "namePrefix": "ArduinoHockeyBLEServer"
+          }]
         })
       
         log('Connecting to GATT Server...')
         const server = await arduino.gatt.connect();
 
         log('Getting Service...')
-        const services = await server.getPrimaryServices()
-        console.log(services)
-        const service = await server.getPrimaryService(serviceUuidInt)
+        const service = await server.getPrimaryService(this.serviceUuid)
 
-        log('Getting Characteristics...')
-        const characteristic = await service.getCharacteristic(characteristicUuidInt)
+        log('Getting managements...')
+        const management = await service.getCharacteristic(this.managementUuid)
+        const valuesCharacteristic = await service.getCharacteristic(this.valuesUuid)
 
-        this.characteristics.push(characteristic)
+        this.managements.push(management)
+        this.valuesCharacteristics.push(valuesCharacteristic)
         this.arduinos.push(arduino)
         this.recordings.push(false)
-        this.valuesFromArduinos.push([])
+        const sensors = {}
+        for (let value of mapping) {
+          if (value != null)
+            sensors[value] = []
+        }
+        this.values.push(sensors)
       } catch (error) {
         log("Error connecting to arduino: " + error)
       } finally {
@@ -121,65 +117,51 @@ export default {
       }
     },
     async startRecording(i) {
-      const characteristic = this.characteristics[i]
+      const values = this.valuesCharacteristics[i]
+      const management = this.managements[i]
       try {
-        await characteristic.startNotifications()
-        characteristic.addEventListener('characteristicvaluechanged', (event) => this.appendReadValue(event, i))
-        // To send data
-        // let encoder = new TextEncoder('utf-8');
-        // characteristic.writeValue(encoder.encode("a"))
+        await values.startNotifications()
+        values.addEventListener('characteristicvaluechanged', (event) => this.appendReadValue(event, i), { passive: true })
+        // communicate to start reading data
+        const start = Uint8Array.from([0x01])
+        await management.writeValue(start)
         this.recordings.splice(i, 1, true)
       } catch(error) {
         log('Error listening to characteristic ' + error);
       }
     },
     async stopRecording(i) {
-      const characteristic = this.characteristics[i]
+      const values = this.valuesCharacteristics[i]
+      const management = this.managements[i]
       try {
-        await characteristic.stopNotifications()
-        characteristic.removeEventListener('characteristicvaluechanged', (event) => this.appendReadValue(event, i))
+        await values.stopNotifications()
+        values.removeEventListener('characteristicvaluechanged', (event) => this.appendReadValue(event, i), { passive: true })
+        // communicate to stop reading data
+        const stop = Uint8Array.from([0x00])
+        await management.writeValue(stop)
         this.recordings.splice(i, 1, false)
+        log(this.values)
+        log(this.counter)
       } catch(error) {
-        log('Error listening to characteristic ' + error);
+        log('Error listening to characteristic ' + error)
       }
-    },
-    async changeRecordingState(i) {
-      const characteristic = this.characteristics[i]
-      const recording = this.recordings[i]
-      this.loading = true
-      if (recording) {
-        characteristic.stopNotifications()
-        characteristic.removeEventListener('characteristicvaluechanged', (event) => this.appendReadValue(event, i))
-      } else {
-        try {
-          await characteristic.startNotifications()
-          characteristic.addEventListener('characteristicvaluechanged', (event) => this.appendReadValue(event, i))
-          // To send data
-          let encoder = new TextEncoder('utf-8');
-          characteristic.writeValue(encoder.encode("a"))
-        } catch(error) {
-          log('Error listening to characteristic ' + error);
-        }
-      }
-
-      this.recordings[i] = !this.recordings[i]
-      this.loading = false
     },
     appendReadValue (event, i) {
-      this.valuesFromArduinos[i].push(event.target.value.getUint8(0))
+      this.counter++
+      // x, y, z (all made of 4 bytes)
+      const buffer = event.target.value
+      // buffer is 13 bytes: first is sensor_id, then three floats, each made of 4 bytes (x, y, z)
+      const sensor_id = buffer.getUint8(0)
+      const measurement_id = buffer.getUint8(13)
+      console.log(measurement_id)
+      const xyz = new Float32Array(buffer.buffer.slice(1,13), 0, 3)
+      try {
+        this.values[i][mapping[sensor_id]].push(xyz)
+      } catch {
+        console.log("Invalid sensor_id (1st byte) sent via bluetooth, ignoring value...")
+      }
     }
   }
 }
-/*
-  {
-    "arduino": "uuid",
-    "accelerometer_bottom": [[x, y, z], ...],
-    "accelerometer_top": [[x, y, z], ...],
-    "gyroscope_bottom": [[x, y, z], ...],
-    "gyroscope_top": [[x, y, z], ...],
-    "measurements_gap": milliseconds
-  }
-
- */
 </script>
 
