@@ -20,6 +20,14 @@
 #define DEBUG
 // =================
 
+#include "USBSerial.h"
+
+using mbed::callback;
+
+#ifdef DEBUG
+    USBSerial pc;
+#endif
+
 #include <stdio.h>
 
 #include "platform/Callback.h"
@@ -34,13 +42,7 @@
 #include "ble/GattServer.h"
 #include "BLEProcess.h"
 
-#include "USBSerial.h"
 
-using mbed::callback;
-
-#ifdef DEBUG
-    USBSerial pc;
-#endif DEBUG
 
 #include "LSM9DS1.h"
 #include "MPU6050.h"
@@ -49,7 +51,8 @@ using mbed::callback;
 DigitalOut i2c_pullup(P1_0);
 DigitalOut i2c_vdd_enable(P0_22);
 
-#define BLE_DATA_PACKET_LEN 13
+#define BLE_DATA_PACKET_LEN 14
+#define BLE_LONG_DATA_PACKET_LEN 420
 
 class HockeyService {
     typedef HockeyService Self;
@@ -57,6 +60,7 @@ class HockeyService {
 public:
     HockeyService(LSM9DS1 arduino_imu, MPU6050 external_imu) :
         _management_characterisic("5143d572-0dcf-11ea-8d71-362b9e155667", 0),
+        _ack_characterisic("165c644c-c0b4-43e7-baf1-5b13dfd55732", 0),
         _data_characterisic("2541489a-0dd1-11ea-8d71-362b9e155667"),
         _hockey_service(
             /* uuid */ "6a0a5c16-0dcf-11ea-8d71-362b9e155667",
@@ -71,12 +75,18 @@ public:
     {
         // update internal pointers (value, descriptors and characteristics array)
         _characteristics[0] = &_management_characterisic;
-        _characteristics[1] = &_data_characterisic;
+        _characteristics[1] = &_ack_characterisic;
+        _characteristics[2] = &_data_characterisic;
 
         _periodic_read_sensors_id = 0;
+        _counter = 0;
+
+        _write_enabled = true;
 
         // setup authorization handlers for write-enable characteristics
         _management_characterisic.setWriteAuthorizationCallback(this, &Self::authorize_client_write);
+        _ack_characterisic.setWriteAuthorizationCallback(this, &Self::authorize_client_write);
+
     }
 
 
@@ -118,6 +128,7 @@ public:
             pc.printf("clock service registered\r\n");
             pc.printf("service handle: %u\r\n", _hockey_service.getHandle());
             pc.printf("\tmanagement characteristic value handle %u\r\n", _management_characterisic.getValueHandle());
+            pc.printf("\tack characteristic value handle %u\r\n", _ack_characterisic.getValueHandle());
             pc.printf("\tdata characteristic value handle %u\r\n", _data_characterisic.getValueHandle());
         #endif
     }
@@ -149,7 +160,7 @@ private:
             if (e->data[0] == 1) {
                 // Start recording from sensors, if we are not currently recording
                 if (_periodic_read_sensors_id == 0) {
-                    _periodic_read_sensors_id = _event_queue->call_every(500 /* ms */, callback(this, &Self::read_sensors));
+                    _periodic_read_sensors_id = _event_queue->call_every(200 /* ms */, callback(this, &Self::read_sensors));
                 }
             } else if (e->data[0] == 0) {
                 // Stop recording from sensors, if we are actually recording
@@ -159,6 +170,12 @@ private:
                 }
             }
         }
+
+        if (e->handle == _ack_characterisic.getValueHandle()) {
+            if (e->data[0] == 2)
+                _write_enabled = true;
+        }
+
 
         #ifdef DEBUG
             pc.printf("\twrite operation: %u\r\n", e->writeOp);
@@ -272,12 +289,14 @@ private:
         memcpy(buffer+1,   (uint8_t*)(&_arduino_imu.ax), 4); // original datatype is float
         memcpy(buffer+1+4, (uint8_t*)(&_arduino_imu.ay), 4);
         memcpy(buffer+1+8, (uint8_t*)(&_arduino_imu.az), 4);
+        buffer[13] = _counter++;
         send_buffer(buffer, BLE_DATA_PACKET_LEN);
 
         buffer[0] = 0x02;
         memcpy(buffer+1,   (uint8_t*)(&_arduino_imu.gx), 4);
         memcpy(buffer+1+4, (uint8_t*)(&_arduino_imu.gy), 4);
         memcpy(buffer+1+8, (uint8_t*)(&_arduino_imu.gz), 4);
+        buffer[13] = _counter++;
         send_buffer(buffer, BLE_DATA_PACKET_LEN);
 
         // External IMU
@@ -295,27 +314,34 @@ private:
         memcpy(buffer+1,   (uint8_t*)(&ax), 4); // original datatype is float
         memcpy(buffer+1+4, (uint8_t*)(&ay), 4);
         memcpy(buffer+1+8, (uint8_t*)(&az), 4);
+        buffer[13] = _counter++;
         send_buffer(buffer, BLE_DATA_PACKET_LEN);
 
         buffer[0] = 0x04;
         memcpy(buffer+1,   (uint8_t*)(&gx), 4);
         memcpy(buffer+1+4, (uint8_t*)(&gy), 4);
         memcpy(buffer+1+8, (uint8_t*)(&gz), 4);
+        buffer[13] = _counter++;
         send_buffer(buffer, BLE_DATA_PACKET_LEN);
 
     }
 
     void send_buffer(uint8_t* buffer, uint16_t len) {
-        ble_error_t err = _data_characterisic.set_buffer(*_server, buffer, len);
-        #ifdef DEBUG
-            pc.printf("Data being sent: \r\n");
-            for (int i = 0; i < BLE_DATA_PACKET_LEN; i++)
-                pc.printf("%u ", buffer[i]);
-            pc.printf("\r\n");
-            if (err) {
-                pc.printf("write of values returned error %u\r\n", err);
+        bool should_transmit_now = _data_characterisic.enqueue_buffer(buffer, len);
+        if (should_transmit_now) {
+            if (_write_enabled == false) {
+                #ifdef DEBUG
+                    pc.printf("I SHOULD SEND BUT I CANNOT, SKIPPING...!!!!!!!");
+                #endif
+            } else {
+                ble_error_t err = _data_characterisic.send_buffer_now(*_server);
+                ble_error_t ack_err = _ack_characterisic.set(*_server, 0x01);
+                _write_enabled = false;
+                #ifdef DEBUG
+                    pc.printf("Sending packet and also sending ACK=0x01!\r\n");
+                #endif
             }
-        #endif
+        }
     }
 
 
@@ -414,36 +440,67 @@ private:
                 /* Initial value */ _buffer,
                 /* Value size */ sizeof(_buffer),
                 /* Value capacity */ sizeof(_buffer),
-                /* Properties */ GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ |
-                                GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_NOTIFY |
-                                GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_INDICATE,
+                /* Properties */ GattCharacteristic::BLE_GATT_CHAR_PROPERTIES_READ,
                 /* Descriptors */ NULL,
                 /* Num descriptors */ 0,
                 /* variable len */ false
-            ) {}
+            ) {
+                _buffer_pos = 0;
+            }
 
-        ble_error_t set_buffer(
-            GattServer &server, uint8_t* buffer, uint16_t length, bool local_only = false
-        ) const {
-            return server.write(getValueHandle(), buffer, length, local_only);
+        ble_error_t send_buffer_now(
+            GattServer &server, bool local_only = false
+        ) {
+            #ifdef DEBUG
+                pc.printf("Data being sent: \r\n");
+                for (int i = 0; i < _buffer_pos; i++) {
+                    pc.printf("%u ", _buffer[i]);
+                    if ((i + 1) % BLE_DATA_PACKET_LEN == 0)
+                        pc.printf("\r\n");
+                }
+            #endif
+            ble_error_t error = server.write(getValueHandle(), _buffer, _buffer_pos, local_only);
+            _buffer_pos = 0;
+            return error;
+        }
+
+        bool enqueue_buffer(uint8_t* buffer, uint16_t length) {
+            #ifdef DEBUG
+                pc.printf("Enqueuing new packet...\r\n");
+            #endif
+            memcpy(&_buffer[_buffer_pos], buffer, length);
+            _buffer_pos += length;
+            #ifdef DEBUG
+                pc.printf("Buffer now contains %u bytes\r\n", _buffer_pos);
+            #endif
+
+            if (_buffer_pos == BLE_LONG_DATA_PACKET_LEN)
+                return true;
+            else
+                return false;
         }
 
     private:
-        uint8_t _buffer[BLE_DATA_PACKET_LEN];
+        uint8_t _buffer[BLE_LONG_DATA_PACKET_LEN];
+        uint16_t _buffer_pos;
     };
 
 
     ReadWriteNotifyIndicateCharacteristic<uint8_t> _management_characterisic;
+    ReadWriteNotifyIndicateCharacteristic<uint8_t> _ack_characterisic;
+
     ReadNotifyIndicateCharacteristic _data_characterisic;
 
     // list of the characteristics of the service
-    GattCharacteristic* _characteristics[2];
+    GattCharacteristic* _characteristics[3];
 
     // service
     GattService _hockey_service;
 
     // to keep the id of the scheduled periodic read_sensors()
     int _periodic_read_sensors_id;
+
+    bool _write_enabled;
 
     GattServer* _server;
     events::EventQueue *_event_queue;
@@ -453,6 +510,8 @@ private:
 
     // Reference to external IMU
     MPU6050 _external_imu;
+
+    int _counter;
 };
 
 

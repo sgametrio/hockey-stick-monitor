@@ -151,6 +151,20 @@ private:
     void when_connection(const Gap::ConnectionCallbackParams_t *connection_event)
     {
         //printf("Connected.\r\n");
+        Gap &gap = _ble_interface.gap();
+
+        Gap::ConnectionParams_t params;
+        params.minConnectionInterval = 6;
+        params.maxConnectionInterval = 6;
+        params.slaveLatency = 0;
+        params.connectionSupervisionTimeout = 600;
+
+        gap.updateConnectionParams(connection_event->handle, &params);
+
+        #ifdef DEBUG
+            pc.printf("Attempted to update connection params\r\n");
+        #endif
+
     }
 
     void when_disconnection(const Gap::DisconnectionCallbackParams_t *event)
@@ -196,17 +210,9 @@ private:
     {
         Gap &gap = _ble_interface.gap();
 
-        Gap::ConnectionParams_t params;
-        params.minConnectionInterval = 8;
-        params.maxConnectionInterval = 20;
-        params.slaveLatency = 0;
-        params.connectionSupervisionTimeout = 600;
-
-        ble_error_t error1 = gap.setPreferredConnectionParams(&params);
-
         /* Use the simple builder to construct the payload; it fails at runtime
          * if there is not enough space left in the buffer */
-        ble_error_t error2 = gap.setAdvertisingPayload(
+        ble_error_t error = gap.setAdvertisingPayload(
             ble::LEGACY_ADVERTISING_HANDLE,
             ble::AdvertisingDataSimpleBuilder<ble::LEGACY_ADVERTISING_MAX_SIZE>()
                 .setFlags()
@@ -214,7 +220,7 @@ private:
                 .getAdvertisingData()
         );
 
-        if (error1 || error2) {
+        if (error) {
             //printf("Gap::setAdvertisingPayload() failed with error %d", error);
             return false;
         }
