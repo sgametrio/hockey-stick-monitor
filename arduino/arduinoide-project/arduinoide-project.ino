@@ -1,7 +1,7 @@
 
 // =================
 // UNCOMMENT THE FOLLOWING LINE TO GET DEBUG OUTPUT ON THE USB SERIAL INTERFACE
-#define DEBUG
+//#define DEBUG
 // =================
 
 
@@ -9,11 +9,15 @@
 #include <Arduino_LSM9DS1.h>
 #include <MPU6050.h>
 
-#define BLE_DATA_PACKET_LEN 14
-#define MEASURING_INTERVAL 30
+#define MEASURING_INTERVAL 7
+#define NUM_MEASURES_IN_PACKET 3
+#define SINGLE_XYZ_SIZE 3*4
+#define SINGLE_IMU_SIZE 2*SINGLE_XYZ_SIZE
+#define SINGLE_MEASURE_SIZE 3*SINGLE_IMU_SIZE
+#define BLE_DATA_PACKET_LEN NUM_MEASURES_IN_PACKET*SINGLE_MEASURE_SIZE + 1
 
-rtos::Thread eventQueueThread;
-events::EventQueue eventQueue;
+rtos::Thread eventQueueThread, sendingQueueThread;
+events::EventQueue eventQueue, sendingQueue;
 
 // BLE Battery Service
 BLEService hockeyService("6a0a5c16-0dcf-11ea-8d71-362b9e155667");
@@ -26,6 +30,9 @@ MPU6050 mpu6050_low, mpu6050_high(MPU6050_ADDRESS_AD0_HIGH);
 
 int packet_counter;
 int periodic_read_sensors_id;
+int measurements_in_databuffer;
+
+uint8_t data_buffer[BLE_DATA_PACKET_LEN], sending_buffer[BLE_DATA_PACKET_LEN];
 
 void initSerial() {
   Serial.begin(9600);    // initialize serial communication
@@ -86,6 +93,7 @@ void setup() {
   initExternalIMUs();
 
   eventQueueThread.start(mbed::callback(&eventQueue, &events::EventQueue::dispatch_forever));
+  sendingQueueThread.start(mbed::callback(&sendingQueue, &events::EventQueue::dispatch_forever));
 }
 
 void loop() {
@@ -100,6 +108,7 @@ void blePeripheralConnectHandler(BLEDevice central) {
   #endif
   packet_counter = 0;
   periodic_read_sensors_id = 0;
+  measurements_in_databuffer = 0;
 }
 
 void blePeripheralDisconnectHandler(BLEDevice central) {
@@ -154,52 +163,63 @@ void readSensors() {
   mpu6050ConvertData(ax3, ay3, az3, ax3_float, ay3_float, az3_float, 2.0);
   mpu6050ConvertData(gx3, gy3, gz3, gx3_float, gy3_float, gz3_float, 250.0);
 
-  #ifdef DEBUG
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE, ax, ay, az);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_XYZ_SIZE, gx, gy, gz);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE, ax2_float, ay2_float, az2_float);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx2_float, gy2_float, gz2_float);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE, ax3_float, ay3_float, az3_float);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx3_float, gy3_float, gz3_float);
+
+  measurements_in_databuffer++;
+
+  if (measurements_in_databuffer == NUM_MEASURES_IN_PACKET) {
+    memcpy(sending_buffer, data_buffer, BLE_DATA_PACKET_LEN);
+    measurements_in_databuffer = 0;
+    // Schedule sending sending_buffer over BLE
+    sendingQueue.call(sendBufferBLE);
+  }
+
+  /*#ifdef DEBUG
     Serial.print("Values from internal accelerometer:");
     Serial.print("ax: ");
-    Serial.print(ax);
+    Serial.print(ax, 6);
     Serial.print("ay: ");
-    Serial.print(ay);
+    Serial.print(ay, 6);
     Serial.print("az: ");
-    Serial.println(az);
+    Serial.println(az, 6);
     Serial.print("Values from low external accelerometer:");
     Serial.print("ax: ");
-    Serial.print(ax2_float);
+    Serial.print(ax2_float, 6);
     Serial.print("ay: ");
-    Serial.print(ay2_float);
+    Serial.print(ay2_float, 6);
     Serial.print("az: ");
-    Serial.print(az2_float);
+    Serial.print(az2_float, 6);
     Serial.println();
     Serial.print("Values from high external accelerometer:");
     Serial.print("ax: ");
-    Serial.print(ax3_float);
+    Serial.print(ax3_float, 6);
     Serial.print("ay: ");
-    Serial.print(ay3_float);
+    Serial.print(ay3_float, 6);
     Serial.print("az: ");
-    Serial.print(az3_float);
+    Serial.print(az3_float, 6);
     Serial.println();
 
-  #endif
+  #endif*/
 
-  sendDataBLE(0x01, ax, ay, az);
-  sendDataBLE(0x02, gx, gy, gz);
-  sendDataBLE(0x03, ax2_float, ay2_float, az2_float);
-  sendDataBLE(0x04, gx2_float, gy2_float, gz2_float);
-  sendDataBLE(0x05, ax3_float, ay3_float, az3_float);
-  sendDataBLE(0x06, gx3_float, gy3_float, gz3_float);
 
 }
 
-void sendDataBLE(uint8_t sensor_id, float x, float y, float z) {
-  uint8_t buffer[BLE_DATA_PACKET_LEN];
-  buffer[0] = sensor_id;
-  memcpy(buffer+1,   (uint8_t*)(&x), 4);
-  memcpy(buffer+1+4, (uint8_t*)(&y), 4);
-  memcpy(buffer+1+8, (uint8_t*)(&z), 4);
-  buffer[13] = packet_counter++;
-  dataCharacteristic.writeValue(buffer, BLE_DATA_PACKET_LEN);
+void packDataInBuffer(int offset, float x, float y, float z) {
+  memcpy(data_buffer+offset,   (uint8_t*)(&x), 4);
+  memcpy(data_buffer+offset+4, (uint8_t*)(&y), 4);
+  memcpy(data_buffer+offset+8, (uint8_t*)(&z), 4);
+}
+
+void sendBufferBLE() {
   #ifdef DEBUG
     Serial.print("Sending packet counter: ");
-    Serial.println(packet_counter-1);
+    Serial.println(packet_counter);
   #endif
+  sending_buffer[BLE_DATA_PACKET_LEN - 1] = packet_counter++;
+  dataCharacteristic.writeValue(sending_buffer, BLE_DATA_PACKET_LEN);
 }
