@@ -1,7 +1,0 @@
-{
-    "target_overrides": {
-        "ARDUINO_NANO33BLE": {
-            "target.mbed_app_start": "0x10000"
-        }
-    }
-}
