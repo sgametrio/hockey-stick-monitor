@@ -1,5 +1,5 @@
 <template>
-  <div class="flex items-center justify-center w-full h-full bg-gray-200">
+  <div class="flex flex-col items-center justify-center w-full h-full bg-gray-200">
     <div class="flex flex-col
                 h-112 w-84 sm:h-128 sm:w-96 md:h-160 md:w-140 lg:h-160 lg:w-192 p-5 
                 border rounded-lg shadow-md bg-white">
@@ -40,7 +40,7 @@
           </div>
         </div>
       </div>
-    </div>    
+    </div>
   </div>
 </template>
 
@@ -48,7 +48,7 @@
 import { log } from "@/components/console"
 import ColorSvg from "@/components/ColorSvg"
 import LoadingSpinner from "@/components/LoadingSpinner"
-import { mapping } from "@/components/sensors"
+import { mapping, sensors } from "@/components/sensors"
 import Api from "@/components/Api"
 
 export default {
@@ -59,7 +59,7 @@ export default {
   },
   data: function () {
     return {
-      PACKET_BURST: 100,
+      PACKET_BURST: 20,
       arduinos: [],
       serviceUuid: "6a0a5c16-0dcf-11ea-8d71-362b9e155667",
       managementUuid: "5143d572-0dcf-11ea-8d71-362b9e155667",
@@ -75,33 +75,28 @@ export default {
       showCounter: false
     }
   },
-  // computed: {
-  //   valuesLength: function () {
-  //     return this.values.length
-  //   }
-  // },
-  // watch: {
-  //   valuesLength: async function (after, before) {
-  //     if (after % PACKET_BURST === 0) {
-  //       // TODO: be sure that we do not lose some values
-  //       console.log("wee")
-  //       const dump = [...this.values]
-  //       this.values = []
-  //       for (let [values, i] of dump) {
-  //         if (values.length > 0) {
-  //           await Api.sendData({
-  //             ...dump
-  //           }, this.arduinos[i].id)
-  //         }
-  //       }
-  //     }
-  //   }
-  // },
+  computed: {
+    valuesFirst () {
+      if (this.values.length === 0)
+        return 0
+
+      return this.values[0][mapping[0]].length
+    }
+  },
+  watch: {
+    async valuesFirst (after, before) {
+      if (after > 0 && after % this.PACKET_BURST === 0) {
+        await this.sendSensorsData()
+      }
+    }
+  },
   mounted() {},
   beforeDestroy() {
     // ensure that I remove event listeners on characteristics
-    for (let [characteristic, i] of this.values) {
-      characteristic.removeEventListener('characteristicvaluechanged', (event) => this.newValueToRead(event, i), { passive: true })
+    for (let [characteristic, i] of this.valuesCharacteristics) {
+      characteristic.removeEventListener('characteristicvaluechanged', async (event) => {
+        await this.readValues(event, i)
+      }, false)
     }
   },
   methods: {
@@ -114,6 +109,8 @@ export default {
           filters: [{
             services: ["6a0a5c16-0dcf-11ea-8d71-362b9e155667"]
           }]
+          // acceptAllDevices: true,
+          // optionalServices: ["6a0a5c16-0dcf-11ea-8d71-362b9e155667"]
         })
       
         log('Connecting to GATT Server...')
@@ -125,19 +122,12 @@ export default {
         log('Getting managements...')
         const management = await service.getCharacteristic(this.managementUuid)
         const valuesCharacteristic = await service.getCharacteristic(this.valuesUuid)
-        // const ack = await service.getCharacteristic(this.ackUuid)
 
         this.managements.push(management)
         this.valuesCharacteristics.push(valuesCharacteristic)
-        // this.acks.push(ack)
         this.arduinos.push(arduino)
         this.recordings.push(false)
-        const sensors = {}
-        for (let value of mapping) {
-          if (value != null)
-            sensors[value] = []
-        }
-        this.values.push(sensors)
+        this.values.push(JSON.parse(JSON.stringify(sensors)))
       } catch (error) {
         log("Error connecting to arduino: " + error)
       } finally {
@@ -147,9 +137,7 @@ export default {
     async startRecording(i) {
       const values = this.valuesCharacteristics[i]
       const management = this.managements[i]
-      // const ack = this.acks[i]
       try {
-        // await ack.startNotifications()
         await values.startNotifications()
         values.addEventListener('characteristicvaluechanged', async (event) => {
           await this.readValues(event, i)
@@ -160,6 +148,7 @@ export default {
         this.showCounter = false
         await management.writeValue(start)
         this.recordings.splice(i, 1, true)
+        await Api.startCommunication({}, this.arduinos[i].id)
       } catch(error) {
         log('Error listening to characteristic ' + error);
       }
@@ -167,30 +156,24 @@ export default {
     async stopRecording(i) {
       const values = this.valuesCharacteristics[i]
       const management = this.managements[i]
-      // const ack = this.acks[i]
       try {
         // communicate to stop reading data
         const stop = Uint8Array.from([0x00])
         await management.writeValue(stop)
-        // await values.stopNotifications()
-        // values.removeEventListener('characteristicvaluechanged', async (event) => {
-        //     await this.newValueToRead(event, i)
-        // }, false)
+        await values.stopNotifications()
+        values.removeEventListener('characteristicvaluechanged', async (event) => {
+            await this.newValueToRead(event, i)
+        }, false)
         this.showCounter = true
-        console.log(this.values)
         this.recordings.splice(i, 1, false)
+
+        // Send remaining data and then send to server the stop sequence
+        const weeeeee = await this.sendSensorsData(/* i */)
+        const stopped = await Api.stopCommunication({}, this.arduinos[i].id)
       } catch(error) {
         log('Error listening to characteristic ' + error)
       }
     },
-    // async newValueToRead(event, i) {
-    //   const byte = event.target.value.getUint8(0)
-    //   if (byte === 1) {
-    //     const read = Uint8Array.from([0x02])
-    //     await this.readValues(i)
-    //     // await this.acks[i].writeValue(read)
-    //   }
-    // },
     async readValues(event, i) {
       this.counter++
       console.log(this.counter)
@@ -203,9 +186,19 @@ export default {
       for (let m = 0; m < messages.byteLength; m += 72) {  // for every message
         for (let s = 0; s < (72 / 12); s++) {  // for every sensor read
           const xyz = new Float32Array(messages.slice(m + s*12, m + s*12 + 12), 0, 3)
-          this.values[i][mapping[s]].push(xyz)
+          this.values[i][mapping[s]].push([...xyz.values()])
         }
       }
+    },
+    sendSensorsData (/* i */) {
+      // TODO: be sure that we do not lose some values in doing this dump stuff
+      const dump = JSON.parse(JSON.stringify(this.values[0]))
+      // To avoid losing reactivity
+      this.$set(this.values, 0, JSON.parse(JSON.stringify(sensors)))
+      return Api.sendData({
+        ...dump,
+        gap: 20
+      }, this.arduinos[0].id)
     }
   }
 }
