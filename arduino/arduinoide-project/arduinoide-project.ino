@@ -1,7 +1,7 @@
 
 // =================
 // UNCOMMENT THE FOLLOWING LINE TO GET DEBUG OUTPUT ON THE USB SERIAL INTERFACE
-//#define DEBUG
+#define DEBUG
 // =================
 
 
@@ -9,7 +9,7 @@
 #include <Arduino_LSM9DS1.h>
 #include <MPU6050.h>
 
-#define MEASURING_INTERVAL 7
+#define MEASURING_INTERVAL 20
 #define NUM_MEASURES_IN_PACKET 3
 #define SINGLE_XYZ_SIZE 3*4
 #define SINGLE_IMU_SIZE 2*SINGLE_XYZ_SIZE
@@ -176,7 +176,8 @@ void readSensors() {
     memcpy(sending_buffer, data_buffer, BLE_DATA_PACKET_LEN);
     measurements_in_databuffer = 0;
     // Schedule sending sending_buffer over BLE
-    sendingQueue.call(sendBufferBLE);
+    sendingQueue.call(sendBufferBLE, packet_counter);
+    packet_counter++;
   }
 
   /*#ifdef DEBUG
@@ -215,11 +216,11 @@ void packDataInBuffer(int offset, float x, float y, float z) {
   memcpy(data_buffer+offset+8, (uint8_t*)(&z), 4);
 }
 
-void sendBufferBLE() {
+void sendBufferBLE(int counter) {
   #ifdef DEBUG
     Serial.print("Sending packet counter: ");
-    Serial.println(packet_counter);
+    Serial.println(counter);
   #endif
-  sending_buffer[BLE_DATA_PACKET_LEN - 1] = packet_counter++;
+  sending_buffer[BLE_DATA_PACKET_LEN - 1] = counter;
   dataCharacteristic.writeValue(sending_buffer, BLE_DATA_PACKET_LEN);
 }
