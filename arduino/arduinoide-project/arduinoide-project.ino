@@ -1,7 +1,7 @@
 
 // =================
 // UNCOMMENT THE FOLLOWING LINE TO GET DEBUG OUTPUT ON THE USB SERIAL INTERFACE
-#define DEBUG
+//#define DEBUG
 // =================
 
 
@@ -9,7 +9,7 @@
 #include <Arduino_LSM9DS1.h>
 #include <MPU6050.h>
 
-#define MEASURING_INTERVAL 20
+#define MEASURING_INTERVAL 10
 #define NUM_MEASURES_IN_PACKET 3
 #define SINGLE_XYZ_SIZE 3*4
 #define SINGLE_IMU_SIZE 2*SINGLE_XYZ_SIZE
@@ -97,8 +97,8 @@ void setup() {
 }
 
 void loop() {
-  // Just poll for BLE events
-  BLE.poll();
+  // Repeatedly poll for BLE events, using a long timeout like 10s (otherwise this loop behaves almost like a busy-wait)
+  BLE.poll(10000);
 }
 
 void blePeripheralConnectHandler(BLEDevice central) {
