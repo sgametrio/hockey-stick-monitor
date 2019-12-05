@@ -39,6 +39,9 @@
             </div>
           </div>
         </div>
+        <div>
+          <apex-chart ref="apex-chart" width=100 height=35 type="area" :series="chartSeries" :options="splineChartOptions"/>
+        </div>
       </div>
     </div>
   </div>
@@ -48,6 +51,7 @@
 import { log } from "@/components/console"
 import ColorSvg from "@/components/ColorSvg"
 import LoadingSpinner from "@/components/LoadingSpinner"
+import VueApexCharts from 'vue-apexcharts'
 import { mapping, sensors, convert_raw } from "@/components/sensors"
 import Api from "@/components/Api"
 
@@ -56,6 +60,7 @@ export default {
   components: {
     "color-svg": ColorSvg,
     "loading-spinner": LoadingSpinner,
+    "apex-chart": VueApexCharts
   },
   data: function () {
     return {
@@ -70,6 +75,33 @@ export default {
       acks: [],
       values: [],
       recordings: [],
+      chartSeries: [],
+      splineChartOptions: {
+        chart: {
+          height: 35,
+          sparkline: {
+            enabled: true
+          },
+          animations: {
+            enabled: false
+          },
+          stroke: {
+            curve: "smooth"
+          }
+        },
+        xaxis: {
+          crosshairs: {
+            width: 1
+          },
+        },
+        yaxis: {
+          min: -10,
+          max: 20
+        },
+        tooltip: {
+          enabled: false
+        }
+      },
       loading: false,
       counter: 0,
       showCounter: false
@@ -90,7 +122,19 @@ export default {
       }
     }
   },
-  mounted() {},
+  mounted() {
+    this.chartSeries.push({
+      name: "live",
+      data: Array.from({length: 20}, () => (Math.random() * 10))
+    })
+    setInterval(() => {
+      const [first, ...rest] = this.chartSeries[0].data
+      this.chartSeries[0].data = [...rest, Math.random() * 10]
+      this.$refs["apex-chart"].updateSeries([{
+        data: this.chartSeries[0].data
+      }])
+    }, 50)
+  },
   beforeDestroy() {
     // ensure that I remove event listeners on characteristics
     for (let [characteristic, i] of this.valuesCharacteristics) {
@@ -127,6 +171,10 @@ export default {
         this.valuesCharacteristics.push(valuesCharacteristic)
         this.arduinos.push(arduino)
         this.recordings.push(false)
+        this.chartSeries.push({
+          name: "live",
+          data: Array.from({length: 10}, () => (Math.random() * 10))
+        })
         this.values.push(JSON.parse(JSON.stringify(sensors)))
       } catch (error) {
         log("Error connecting to arduino: " + error)
@@ -191,6 +239,8 @@ export default {
           }
           this.values[i][mapping[s]].push([...computed.values()])
         }
+        // update chart with last value to give "live" feeling
+        this.chartSeries[i].data.push(computed[0])
       }
     },
     sendSensorsData (/* i */) {
