@@ -48,7 +48,7 @@
 import { log } from "@/components/console"
 import ColorSvg from "@/components/ColorSvg"
 import LoadingSpinner from "@/components/LoadingSpinner"
-import { mapping, sensors } from "@/components/sensors"
+import { mapping, sensors, convert_raw } from "@/components/sensors"
 import Api from "@/components/Api"
 
 export default {
@@ -176,17 +176,20 @@ export default {
     },
     async readValues(event, i) {
       this.counter++
-      console.log(this.counter)
-      // a single message is 3*4*2*3 = 72 byte (x,y,z)*(4 byte)*(2 sensor)*(3 IMU)
+      // console.log(this.counter)
+      // a single message is 3*2*2*3 = 36 byte (x,y,z)*(2 byte)*(2 sensor)*(3 IMU)
       // messages contains N message + 1 byte of packet_id (at the end)
       const packet = event.target.value
       const messages = packet.buffer.slice(0, packet.byteLength - 1)
       const packet_id = packet.getUint8(packet.byteLength - 1)
-      // alert(messages.byteLength)
-      for (let m = 0; m < messages.byteLength; m += 72) {  // for every message
-        for (let s = 0; s < (72 / 12); s++) {  // for every sensor read
-          const xyz = new Float32Array(messages.slice(m + s*12, m + s*12 + 12), 0, 3)
-          this.values[i][mapping[s]].push([...xyz.values()])
+      for (let m = 0; m < messages.byteLength; m += 36) {  // for every message
+        for (let s = 0; s < (36 / 6); s++) {  // for every sensor read
+          const xyz = new Int16Array(messages.slice(m + s*6, m + s*6 + 6), 0, 3)
+          let computed = new Float32Array(3)
+          for (let x = 0; x < 3; x++) {  // convert from int16 to float according to fullscale
+            computed[x] = convert_raw[mapping[s]](xyz[x])
+          }
+          this.values[i][mapping[s]].push([...computed.values()])
         }
       }
     },
@@ -202,5 +205,6 @@ export default {
     }
   }
 }
+// mauro.prevostini@usi.ch
 </script>
 
