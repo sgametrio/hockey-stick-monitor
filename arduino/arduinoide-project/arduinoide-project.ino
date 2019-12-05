@@ -75,6 +75,10 @@ void initExternalIMUs() {
   Wire.begin();
   mpu6050_low.initialize();
   mpu6050_high.initialize();
+  mpu6050_low.setFullScaleAccelRange(MPU6050_ACCEL_FS_4);
+  mpu6050_low.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
+  mpu6050_high.setFullScaleAccelRange(MPU6050_ACCEL_FS_4);
+  mpu6050_high.setFullScaleGyroRange(MPU6050_GYRO_FS_2000);
   #ifdef DEBUG
     Serial.println(mpu6050_low.testConnection() ? "MPU6050 low connection successful" : "MPU6050 low connection failed");
     Serial.println(mpu6050_high.testConnection() ? "MPU6050 high connection successful" : "MPU6050 high connection failed");
@@ -140,35 +144,33 @@ void managementCharacteristicWritten(BLEDevice central, BLECharacteristic charac
   }
 }
 
-void mpu6050ConvertData(int16_t x, int16_t y, int16_t z, float &fx, float &fy, float &fz, float fullscale) {
+/*void mpu6050ConvertData(int16_t x, int16_t y, int16_t z, float &fx, float &fy, float &fz, float fullscale) {
   fx = x * fullscale / 32768.0;
   fy = y * fullscale / 32768.0;
   fz = z * fullscale / 32768.0;
-}
+}*/
 
 void readSensors() {
-  float ax, ay, az, gx, gy, gz;
+  int16_t ax, ay, az, gx, gy, gz;
   int16_t ax2, ay2, az2, gx2, gy2, gz2;
-  float ax2_float, ay2_float, az2_float, gx2_float, gy2_float, gz2_float;
   int16_t ax3, ay3, az3, gx3, gy3, gz3;
-  float ax3_float, ay3_float, az3_float, gx3_float, gy3_float, gz3_float;
 
-  IMU.readAcceleration(ax, ay, az);
-  IMU.readGyroscope(gx, gy, gz);
+  IMU.readRawAcceleration(ax, ay, az);
+  IMU.readRawGyroscope(gx, gy, gz);
   mpu6050_low.getMotion6( &ax2, &ay2, &az2, &gx2, &gy2, &gz2);
   mpu6050_high.getMotion6(&ax3, &ay3, &az3, &gx3, &gy3, &gz3);
 
-  mpu6050ConvertData(ax2, ay2, az2, ax2_float, ay2_float, az2_float, 2.0);
+/*  mpu6050ConvertData(ax2, ay2, az2, ax2_float, ay2_float, az2_float, 2.0);
   mpu6050ConvertData(gx2, gy2, gz2, gx2_float, gy2_float, gz2_float, 250.0);
   mpu6050ConvertData(ax3, ay3, az3, ax3_float, ay3_float, az3_float, 2.0);
-  mpu6050ConvertData(gx3, gy3, gz3, gx3_float, gy3_float, gz3_float, 250.0);
+  mpu6050ConvertData(gx3, gy3, gz3, gx3_float, gy3_float, gz3_float, 250.0);*/
 
   packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE, ax, ay, az);
   packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_XYZ_SIZE, gx, gy, gz);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE, ax2_float, ay2_float, az2_float);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx2_float, gy2_float, gz2_float);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE, ax3_float, ay3_float, az3_float);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx3_float, gy3_float, gz3_float);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE, ax2, ay2, az2);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx2, gy2, gz2);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE, ax3, ay3, az3);
+  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx3, gy3, gz3);
 
   measurements_in_databuffer++;
 
@@ -180,40 +182,12 @@ void readSensors() {
     packet_counter++;
   }
 
-  /*#ifdef DEBUG
-    Serial.print("Values from internal accelerometer:");
-    Serial.print("ax: ");
-    Serial.print(ax, 6);
-    Serial.print("ay: ");
-    Serial.print(ay, 6);
-    Serial.print("az: ");
-    Serial.println(az, 6);
-    Serial.print("Values from low external accelerometer:");
-    Serial.print("ax: ");
-    Serial.print(ax2_float, 6);
-    Serial.print("ay: ");
-    Serial.print(ay2_float, 6);
-    Serial.print("az: ");
-    Serial.print(az2_float, 6);
-    Serial.println();
-    Serial.print("Values from high external accelerometer:");
-    Serial.print("ax: ");
-    Serial.print(ax3_float, 6);
-    Serial.print("ay: ");
-    Serial.print(ay3_float, 6);
-    Serial.print("az: ");
-    Serial.print(az3_float, 6);
-    Serial.println();
-
-  #endif*/
-
-
 }
 
-void packDataInBuffer(int offset, float x, float y, float z) {
-  memcpy(data_buffer+offset,   (uint8_t*)(&x), 4);
-  memcpy(data_buffer+offset+4, (uint8_t*)(&y), 4);
-  memcpy(data_buffer+offset+8, (uint8_t*)(&z), 4);
+void packDataInBuffer(int offset, int16_t x, int16_t y, int16_t z) {
+  memcpy(data_buffer+offset,   (uint8_t*)(&x), 2);
+  memcpy(data_buffer+offset+2, (uint8_t*)(&y), 2);
+  memcpy(data_buffer+offset+4, (uint8_t*)(&z), 2);
 }
 
 void sendBufferBLE(int counter) {
