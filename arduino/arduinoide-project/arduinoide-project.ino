@@ -1,23 +1,29 @@
 
 // =================
 // UNCOMMENT THE FOLLOWING LINE TO GET DEBUG OUTPUT ON THE USB SERIAL INTERFACE
-//#define DEBUG
+// #define DEBUG
 // =================
 
 
 #include <ArduinoBLE.h>
 #include <Arduino_LSM9DS1.h>
 #include <MPU6050.h>
+#include <assert.h>
 
 #define MEASURING_INTERVAL 10
-#define NUM_MEASURES_IN_PACKET 3
-#define SINGLE_XYZ_SIZE 3*4
+#define NUM_MEASURES_IN_PACKET 6
+#define SINGLE_XYZ_SIZE 3*2
 #define SINGLE_IMU_SIZE 2*SINGLE_XYZ_SIZE
 #define SINGLE_MEASURE_SIZE 3*SINGLE_IMU_SIZE
 #define BLE_DATA_PACKET_LEN NUM_MEASURES_IN_PACKET*SINGLE_MEASURE_SIZE + 1
 
-rtos::Thread eventQueueThread, sendingQueueThread;
-events::EventQueue eventQueue, sendingQueue;
+struct data_packet_t {
+  uint8_t buffer[BLE_DATA_PACKET_LEN];
+  int buffer_len;
+};
+
+rtos::Thread eventQueueThread, sendingQueueThread(osPriorityBelowNormal7);
+events::EventQueue eventQueue, sendingQueue(64 * (4 + sizeof(data_packet_t)));
 
 // BLE Battery Service
 BLEService hockeyService("6a0a5c16-0dcf-11ea-8d71-362b9e155667");
@@ -32,7 +38,7 @@ int packet_counter;
 int periodic_read_sensors_id;
 int measurements_in_databuffer;
 
-uint8_t data_buffer[BLE_DATA_PACKET_LEN], sending_buffer[BLE_DATA_PACKET_LEN];
+data_packet_t data_packet;
 
 void initSerial() {
   Serial.begin(9600);    // initialize serial communication
@@ -56,6 +62,7 @@ void initBLE() {
   BLE.setEventHandler(BLEDisconnected, blePeripheralDisconnectHandler);
 
   managementCharacteristic.setEventHandler(BLEWritten, managementCharacteristicWritten);
+  data_packet.buffer_len = BLE_DATA_PACKET_LEN;
 
   BLE.advertise();
   #ifdef DEBUG 
@@ -141,14 +148,13 @@ void managementCharacteristicWritten(BLEDevice central, BLECharacteristic charac
   else if (value == 0 && periodic_read_sensors_id > 0) {
     eventQueue.cancel(periodic_read_sensors_id);
     periodic_read_sensors_id = 0;
+    // Enqueue a "FIN" packet (just one byte: 0xFF)
+    data_packet_t fin_packet;
+    fin_packet.buffer[0] = 0xFF;
+    fin_packet.buffer_len = 1;
+    tryToEnqueueSendingBLEPacket(fin_packet);
   }
 }
-
-/*void mpu6050ConvertData(int16_t x, int16_t y, int16_t z, float &fx, float &fy, float &fz, float fullscale) {
-  fx = x * fullscale / 32768.0;
-  fy = y * fullscale / 32768.0;
-  fz = z * fullscale / 32768.0;
-}*/
 
 void readSensors() {
   int16_t ax, ay, az, gx, gy, gz;
@@ -160,41 +166,46 @@ void readSensors() {
   mpu6050_low.getMotion6( &ax2, &ay2, &az2, &gx2, &gy2, &gz2);
   mpu6050_high.getMotion6(&ax3, &ay3, &az3, &gx3, &gy3, &gz3);
 
-/*  mpu6050ConvertData(ax2, ay2, az2, ax2_float, ay2_float, az2_float, 2.0);
-  mpu6050ConvertData(gx2, gy2, gz2, gx2_float, gy2_float, gz2_float, 250.0);
-  mpu6050ConvertData(ax3, ay3, az3, ax3_float, ay3_float, az3_float, 2.0);
-  mpu6050ConvertData(gx3, gy3, gz3, gx3_float, gy3_float, gz3_float, 250.0);*/
-
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE, ax, ay, az);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_XYZ_SIZE, gx, gy, gz);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE, ax2, ay2, az2);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx2, gy2, gz2);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE, ax3, ay3, az3);
-  packDataInBuffer(measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx3, gy3, gz3);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE, ax, ay, az);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_XYZ_SIZE, gx, gy, gz);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE, ax2, ay2, az2);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx2, gy2, gz2);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE, ax3, ay3, az3);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx3, gy3, gz3);
 
   measurements_in_databuffer++;
 
   if (measurements_in_databuffer == NUM_MEASURES_IN_PACKET) {
-    memcpy(sending_buffer, data_buffer, BLE_DATA_PACKET_LEN);
-    measurements_in_databuffer = 0;
-    // Schedule sending sending_buffer over BLE
-    sendingQueue.call(sendBufferBLE, packet_counter);
+    // This assignment makes a "deep copy" of the buffer array within the struct
+    data_packet_t final_data_packet = data_packet;
+    final_data_packet.buffer[BLE_DATA_PACKET_LEN - 1] = packet_counter;
     packet_counter++;
+    measurements_in_databuffer = 0;
+    // Attempt to schedule the sending of the packet over BLE
+    tryToEnqueueSendingBLEPacket(final_data_packet);
   }
 
 }
 
-void packDataInBuffer(int offset, int16_t x, int16_t y, int16_t z) {
-  memcpy(data_buffer+offset,   (uint8_t*)(&x), 2);
-  memcpy(data_buffer+offset+2, (uint8_t*)(&y), 2);
-  memcpy(data_buffer+offset+4, (uint8_t*)(&z), 2);
+void tryToEnqueueSendingBLEPacket(data_packet_t data_packet) {
+  int res = sendingQueue.call(sendBufferBLE, data_packet);
+  #ifdef DEBUG
+    if (res == 0)
+      Serial.println("Failed to enqueue a sending packet!");
+  #endif
+  assert(res != 0);
 }
 
-void sendBufferBLE(int counter) {
+void packDataInBuffer(uint8_t* buffer, int offset, float x, float y, float z) {
+  memcpy(buffer+offset,   (uint8_t*)(&x), 4);
+  memcpy(buffer+offset+4, (uint8_t*)(&y), 4);
+  memcpy(buffer+offset+8, (uint8_t*)(&z), 4);
+}
+
+void sendBufferBLE(data_packet_t data_packet) {
   #ifdef DEBUG
     Serial.print("Sending packet counter: ");
-    Serial.println(counter);
+    Serial.println(data_packet.buffer[BLE_DATA_PACKET_LEN - 1]);
   #endif
-  sending_buffer[BLE_DATA_PACKET_LEN - 1] = counter;
-  dataCharacteristic.writeValue(sending_buffer, BLE_DATA_PACKET_LEN);
+  dataCharacteristic.writeValue(data_packet.buffer, data_packet.buffer_len);
 }
