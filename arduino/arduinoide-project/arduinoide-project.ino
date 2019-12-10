@@ -196,10 +196,10 @@ void tryToEnqueueSendingBLEPacket(data_packet_t data_packet) {
   assert(res != 0);
 }
 
-void packDataInBuffer(uint8_t* buffer, int offset, float x, float y, float z) {
-  memcpy(buffer+offset,   (uint8_t*)(&x), 4);
-  memcpy(buffer+offset+4, (uint8_t*)(&y), 4);
-  memcpy(buffer+offset+8, (uint8_t*)(&z), 4);
+void packDataInBuffer(uint8_t* buffer, int offset, int16_t x, int16_t y, int16_t z) {
+  memcpy(buffer+offset,   (uint8_t*)(&x), 2);
+  memcpy(buffer+offset+2, (uint8_t*)(&y), 2);
+  memcpy(buffer+offset+4, (uint8_t*)(&z), 2);
 }
 
 void sendBufferBLE(data_packet_t data_packet) {
