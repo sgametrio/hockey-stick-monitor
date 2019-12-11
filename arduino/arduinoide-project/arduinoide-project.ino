@@ -10,10 +10,10 @@
 #include <MPU6050.h>
 #include <assert.h>
 
-#define MEASURING_INTERVAL 10
-#define NUM_MEASURES_IN_PACKET 6
+#define MEASURING_INTERVAL 15
+#define NUM_MEASURES_IN_PACKET 4
 #define SINGLE_XYZ_SIZE 3*2
-#define SINGLE_IMU_SIZE 2*SINGLE_XYZ_SIZE
+#define SINGLE_IMU_SIZE 3*SINGLE_XYZ_SIZE
 #define SINGLE_MEASURE_SIZE 3*SINGLE_IMU_SIZE
 #define BLE_DATA_PACKET_LEN NUM_MEASURES_IN_PACKET*SINGLE_MEASURE_SIZE + 1
 
@@ -148,30 +148,39 @@ void managementCharacteristicWritten(BLEDevice central, BLECharacteristic charac
   else if (value == 0 && periodic_read_sensors_id > 0) {
     eventQueue.cancel(periodic_read_sensors_id);
     periodic_read_sensors_id = 0;
-    // Enqueue a "FIN" packet (just one byte: 0xFF)
+    // Enqueue a "FIN" packet (just four bytes: 0xFFFFFFFF)
     data_packet_t fin_packet;
     fin_packet.buffer[0] = 0xFF;
-    fin_packet.buffer_len = 1;
+    fin_packet.buffer[1] = 0xFF;
+    fin_packet.buffer[2] = 0xFF;
+    fin_packet.buffer[3] = 0xFF;
+    fin_packet.buffer_len = 4;
     tryToEnqueueSendingBLEPacket(fin_packet);
   }
 }
 
 void readSensors() {
-  int16_t ax, ay, az, gx, gy, gz;
+  int16_t ax, ay, az, gx, gy, gz, mx, my, mz;
   int16_t ax2, ay2, az2, gx2, gy2, gz2;
   int16_t ax3, ay3, az3, gx3, gy3, gz3;
 
   IMU.readRawAcceleration(ax, ay, az);
   IMU.readRawGyroscope(gx, gy, gz);
+  IMU.readRawMagneticField(mx, my, mz);
   mpu6050_low.getMotion6( &ax2, &ay2, &az2, &gx2, &gy2, &gz2);
   mpu6050_high.getMotion6(&ax3, &ay3, &az3, &gx3, &gy3, &gz3);
 
   packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE, ax, ay, az);
   packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_XYZ_SIZE, gx, gy, gz);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_XYZ_SIZE, mx, my, mz);
+
   packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE, ax2, ay2, az2);
   packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx2, gy2, gz2);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + SINGLE_IMU_SIZE + 2*SINGLE_XYZ_SIZE, mx, my, mz);
+
   packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE, ax3, ay3, az3);
   packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE + SINGLE_XYZ_SIZE, gx3, gy3, gz3);
+  packDataInBuffer(data_packet.buffer, measurements_in_databuffer * SINGLE_MEASURE_SIZE + 2*SINGLE_IMU_SIZE + 2*SINGLE_XYZ_SIZE, mx, my, mz);
 
   measurements_in_databuffer++;
 
