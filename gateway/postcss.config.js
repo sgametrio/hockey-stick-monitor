@@ -19,6 +19,6 @@ module.exports = {
     require('autoprefixer'),
     ...process.env.NODE_ENV === 'production'
       ? [purgecss]
-      : [purgecss] // otherwise it is too big
+      : [] // otherwise it is too big
   ]
 }

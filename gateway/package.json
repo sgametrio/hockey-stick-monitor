@@ -11,6 +11,8 @@
     "apexcharts": "^3.10.1",
     "axios": "github:axios/axios#master",
     "axios-retry": "^3.1.2",
+    "babylonjs": "^4.0.3",
+    "compute-l2norm": "^1.1.0",
     "core-js": "^3.3.2",
     "register-service-worker": "^1.6.2",
     "tailwindcss": "^1.1.3",
