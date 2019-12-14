@@ -10,6 +10,27 @@
 <div class="container">
     <div class="row">
         <div class="col-12">
+            <select id="uuid-selector" onchange="updateRegistrations(this)">
+            </select>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12">
+            <select id="reg-selector" onchange="updateChart(this)">
+            </select>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12">
+            <select id="sensor-selector">
+                <option value="top" selected>Top</option>
+                <option value="mid">Mid</option>
+                <option value="bot">Bottom</option>
+            </select>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12">
             <div class="card">
                 <div class="card-body">
                     <canvas id="canvas"></canvas>
@@ -25,73 +46,147 @@
 <!--suppress JSUnresolvedLibraryURL -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js"></script>
 <script>
-    $(document).ready(function () {
-        const config = {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [{
-                    label: "Random Dataset",
-                    backgroundColor: 'rgb(255, 99, 132)',
-                    borderColor: 'rgb(255, 99, 132)',
-                    data: [],
-                    fill: false,
-                }],
+
+    const config = {
+        type: 'line',
+        data: {
+            labels: [],
+            datasets: [{
+                label: "X",
+                backgroundColor: 'rgb(255, 99, 132)',
+                borderColor: 'rgb(255, 99, 132)',
+                data: [],
+                fill: false,
+            }, {
+                label: "Y",
+                backgroundColor: 'rgb(0, 99, 132)',
+                borderColor: 'rgb(0, 99, 132)',
+                data: [],
+                fill: false,
+            }, {
+                label: "Z",
+                backgroundColor: 'rgb(255, 99, 0)',
+                borderColor: 'rgb(255, 99, 0)',
+                data: [],
+                fill: false,
+            }
+            ],
+        },
+        options: {
+            responsive: true,
+            title: {
+                display: true,
+                text: 'Accelerometer data'
             },
-            options: {
-                responsive: true,
-                title: {
+            tooltips: {
+                mode: 'index',
+                intersect: false,
+            },
+            hover: {
+                mode: 'nearest',
+                intersect: true
+            },
+            scales: {
+                xAxes: [{
                     display: true,
-                    text: 'Accelerometer data'
-                },
-                tooltips: {
-                    mode: 'index',
-                    intersect: false,
-                },
-                hover: {
-                    mode: 'nearest',
-                    intersect: true
-                },
-                scales: {
-                    xAxes: [{
+                    scaleLabel: {
                         display: true,
-                        scaleLabel: {
-                            display: true,
-                            labelString: 'Time'
-                        }
-                    }],
-                    yAxes: [{
+                        labelString: 'Time'
+                    }
+                }],
+                yAxes: [{
+                    display: true,
+                    scaleLabel: {
                         display: true,
-                        scaleLabel: {
-                            display: true,
-                            labelString: 'Value'
-                        }
-                    }]
-                }
+                        labelString: 'Value'
+                    }
+                }]
             }
-        };
-
-        const context = document.getElementById('canvas').getContext('2d');
-
-        const lineChart = new Chart(context, config);
-
-        const source = new EventSource("/chart-data");
-
-        source.onmessage = function (event) {
-
-            console.log(event.data)
-            const data = JSON.parse(event.data);
-            console.log(data)
-
-            if (config.data.labels.length === 20) {
-                config.data.labels.shift();
-                config.data.datasets[0].data.shift();
-            }
-            config.data.labels.push(data.time);
-            config.data.datasets[0].data.push(data.value);
-            lineChart.update();
         }
+    };
+
+    const context = document.getElementById('canvas').getContext('2d');
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    $(document).ready(function () {
+
+        $.get("/api/devices", function (data) {
+            let devices = JSON.parse(data);
+            let devSelector = document.getElementById("uuid-selector");
+            for (let i = 0; i < devices.length; i++) {
+                let opt = devices[i];
+                let el = document.createElement("option");
+                el.textContent = opt;
+                el.value = i;
+                devSelector.appendChild(el);
+            }
+            devSelector.options[0].selected = true;
+
+            let fakeChange = new Event('change');
+            devSelector.dispatchEvent(fakeChange);
+        });
+
     });
+
+
+    function updateRegistrations(select) {
+        console.log("User clicked uuid " + select.value);
+
+        let devSelector = document.getElementById("uuid-selector");
+        let device_uuid = devSelector.options[devSelector.selectedIndex].text;
+
+        for (let i = document.getElementById("reg-selector").options.length; i-- > 0;)
+            document.getElementById("reg-selector").options[i] = null;
+        $.get("/api/devices/" + device_uuid, function (data) {
+            let registrations = JSON.parse(data);
+            let regSelector = document.getElementById("reg-selector");
+            for (let i = 0; i < registrations.length; i++) {
+                let start_time = registrations[i];
+                let date = new Date(start_time);
+                let opt = date.toLocaleTimeString();
+                let el = document.createElement("option");
+                el.textContent = opt;
+                el.value = i;
+                regSelector.appendChild(el);
+            }
+            regSelector.options[0].selected = true;
+
+            let fakeChange = new Event('change');
+            regSelector.dispatchEvent(fakeChange);
+        });
+    }
+
+     function updateChart(select) {
+        console.log("User clicked reg " + select.value);
+
+        let devSelector = document.getElementById("uuid-selector");
+        let device_uuid = devSelector.options[devSelector.selectedIndex].text;
+
+        let sensorSelector = document.getElementById("sensor-selector");
+        let sensor = sensorSelector.options[sensorSelector.selectedIndex].value;
+
+        console.log(sensor);
+        const lineChart = new Chart(context, config);
+        $.get("/api/devices/" + device_uuid + "/" + select.value, async function (data) {
+            let reg_data = JSON.parse(data)[0].data;
+            for (let i = 0; i < reg_data.length; i++) {
+                let d = reg_data[i];
+                console.log(d);
+                config.data.labels.push(d.time);
+                config.data.datasets[0].data.push(d[sensor].compl_angles.x);
+                config.data.datasets[1].data.push(d[sensor].compl_angles.y);
+                config.data.datasets[2].data.push(d[sensor].compl_angles.z);
+                lineChart.update();
+
+                await sleep(300);
+            }
+        });
+    }
+
+
 </script>
 </body>
 </html>
