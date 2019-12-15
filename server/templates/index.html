@@ -5,46 +5,59 @@
     <title>Creating Real-Time Charts with Flask</title>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.3.1/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.css" rel="stylesheet">
+    <style>@import url("https://fonts.googleapis.com/css?family=Lato");
+
+    body {
+        font-family: Lato, Arial;
+        color: #fff;
+        padding: 20px;
+        background-color: black;
+    }
+
+    .vertical-center {
+        min-height: 100%;
+        min-height: 100vh;
+
+        display: flex;
+        align-items: center;
+        background-color: black;
+    }
+
+    </style>
 </head>
 <body>
-<div class="container">
-    <div class="row">
-        <div class="col-12">
-            <select id="uuid-selector" onchange="updateRegistrations(this)">
-            </select>
+<div class="jumbotron vertical-center">
+    <div class="container">
+        <div class="row">
+
+            <div class="col-12 text-center">
+                <select id="uuid-selector">
+                </select>
+
+                <select id="reg-selector">
+                </select>
+
+                <select id="IMU-selector">
+                    <option value="top">Top (Arduino board)</option>
+                    <option value="mid">Mid</option>
+                    <option value="bot">Bottom</option>
+                </select>
+
+                <select id="sensor-selector">
+                    <option value="acc">Accelerometer</option>
+                    <option value="mag">Magnetometer</option>
+                    <option value="gyr">Gyroscope</option>
+                    <option value="accmag_data_tan">Mag-compensated Acceleration</option>
+                    <option value="compl_angles">Angles (Complimentary Filter)</option>
+                </select>
+            </div>
         </div>
-    </div>
-    <div class="row">
-        <div class="col-12">
-            <select id="reg-selector" onchange="updateChart(this)">
-            </select>
-        </div>
-    </div>
-    <div class="row">
-        <div class="col-12">
-            <select id="IMU-selector" onchange="document.getElementById('reg-selector').dispatchEvent(new Event('change'))">
-                <option value="top" selected>Top</option>
-                <option value="mid">Mid</option>
-                <option value="bot">Bottom</option>
-            </select>
-        </div>
-    </div>
-    <div class="row">
-        <div class="col-12">
-            <select id="sensor-selector" onchange="document.getElementById('reg-selector').dispatchEvent(new Event('change'))">
-                <option value="acc" selected>Accelerator</option>
-                <option value="mag">Magnetometer</option>
-                <option value="gyr">Gyroscope</option>
-                <option value="accmag_data">Magnetometer compensated Accelleration</option>
-                <option value="compl_angles">Complimentary Filtered Angles</option>
-            </select>
-        </div>
-    </div>
-    <div class="row">
-        <div class="col-12">
-            <div class="card">
-                <div class="card-body">
-                    <canvas id="canvas"></canvas>
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-body" style="background-color: black;">
+                        <canvas id="canvas"></canvas>
+                    </div>
                 </div>
             </div>
         </div>
@@ -58,36 +71,63 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/2.8.0/Chart.min.js"></script>
 <script>
 
-    const config = {
+    let chartColors = {
+        red: 'rgb(255, 99, 132)',
+        orange: 'rgb(255, 159, 64)',
+        yellow: 'rgb(255, 205, 86)',
+        green: 'rgb(75, 192, 192)',
+        blue: 'rgb(54, 162, 235)',
+        purple: 'rgb(153, 102, 255)',
+        grey: 'rgb(231,233,237)'
+    };
+    let config = {
         type: 'line',
+        animation: false,
         data: {
             labels: [],
             datasets: [{
                 label: "X",
-                backgroundColor: 'rgb(255, 99, 132)',
-                borderColor: 'rgb(255, 99, 132)',
+                backgroundColor: 'rgb(218,0,23)',
+                borderColor: 'rgb(218,0,23)',
                 data: [],
                 fill: false,
             }, {
                 label: "Y",
-                backgroundColor: 'rgb(0, 99, 132)',
-                borderColor: 'rgb(0, 99, 132)',
+                backgroundColor: 'rgb(44,105,169)',
+                borderColor: 'rgb(44,105,169)',
                 data: [],
                 fill: false,
             }, {
                 label: "Z",
-                backgroundColor: 'rgb(255, 99, 0)',
-                borderColor: 'rgb(255, 99, 0)',
+                backgroundColor: 'rgb(65,163,58)',
+                borderColor: 'rgb(65,163,58)',
                 data: [],
                 fill: false,
             }
             ],
         },
         options: {
+            legend: {
+                position: 'top',
+                labels: {
+                    fontColor: 'white'
+                }
+            },
+            showLines: false,
+            animation: {
+                duration: 0 // general animation time
+            },
+            responsiveAnimationDuration: 0, // animation duration after a resize
+            elements: {
+                line: {
+                    tension: 0
+                }
+            },
             responsive: true,
             title: {
                 display: true,
-                text: 'Accelerometer data'
+                text: 'Data',
+                fontColor: 'white'
             },
             tooltips: {
                 mode: 'index',
@@ -95,11 +135,21 @@
             },
             hover: {
                 mode: 'nearest',
-                intersect: true
+                intersect: true,
+                animationDuration: 0 // duration of animations when hovering an item
+            },
+            pointLabels: {
+                fontColor: 'white' // labels around the edge like 'Running'
+            },
+            gridLines: {
+                color: 'rgba(255, 255, 255, 0.2)'
+            },
+            angleLines: {
+                color: 'white' // lines radiating from the center
             },
             scales: {
                 xAxes: [{
-                    display: true,
+                    display: false,
                     scaleLabel: {
                         display: true,
                         labelString: 'Time'
@@ -111,10 +161,23 @@
                         display: true,
                         labelString: 'Value'
                     }
-                }]
+                }],
+                ticks: {
+                    fontColor: 'white', // labels such as 10, 20, etc
+                    showLabelBackdrop: false // hide square behind text
+                },
             }
         }
     };
+
+    // A plugin to draw the background color
+    Chart.plugins.register({
+        beforeDraw: function (chartInstance) {
+            var ctx = chartInstance.chart.ctx;
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, chartInstance.chart.width, chartInstance.chart.height);
+        }
+    })
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
@@ -140,12 +203,10 @@
 
     });
 
+    $('#uuid-selector').on('change', function () {
+        console.log("User changed uuid to " + this.value);
 
-    function updateRegistrations(select) {
-        console.log("User clicked uuid " + select.value);
-
-        let devSelector = document.getElementById("uuid-selector");
-        let device_uuid = devSelector.options[devSelector.selectedIndex].text;
+        let device_uuid = $("#uuid-selector option:selected").text();
 
         for (let i = document.getElementById("reg-selector").options.length; i-- > 0;)
             document.getElementById("reg-selector").options[i] = null;
@@ -161,27 +222,35 @@
                 el.value = i;
                 regSelector.appendChild(el);
             }
-            regSelector.options[0].selected = true;
+            regSelector.options[regSelector.options.length - 1].selected = true;
 
             let fakeChange = new Event('change');
             regSelector.dispatchEvent(fakeChange);
 
-
         });
-    }
+    });
 
-     function updateChart(select) {
-        console.log("User clicked reg " + select.value);
+    $('#reg-selector').on('change', function () {
+        console.log("User clicked registration to " + this.value);
+        updateChart();
+    });
 
-        let devSelector = document.getElementById("uuid-selector");
-        let device_uuid = devSelector.options[devSelector.selectedIndex].text;
+    $('#IMU-selector').on('change', function () {
+        console.log("User changed IMU to " + this.value);
+        updateChart();
+    });
 
-        let imuSelector = document.getElementById("IMU-selector");
-        let IMU = imuSelector.options[imuSelector.selectedIndex].value;
+    $('#sensor-selector').on('change', function () {
+        console.log("User changed sensor to " + this.value);
+        updateChart();
+    });
 
-        let sensorSelector = document.getElementById("sensor-selector");
-        let sensor = sensorSelector.options[sensorSelector.selectedIndex].value;
+    function updateChart() {
 
+        let device_uuid = $("#uuid-selector option:selected").text();
+        let registration_id = $("#reg-selector option:selected").val();
+        let IMU = $("#IMU-selector option:selected").val();
+        let sensor = $("#sensor-selector option:selected").val();
         console.log(IMU, sensor);
 
         $('#canvas').remove();
@@ -189,33 +258,39 @@
 
         let context = document.getElementById('canvas').getContext('2d');
 
-        let custom_config = config;
-        if (sensor.localeCompare("accmag_data")){
-            custom_config.data.datasets[0].label = "pitch (acc)";
-            custom_config.data.datasets[1].label = "roll (acc)";
-            custom_config.data.datasets[2].label = "yaw (mag)";
+        if (sensor.includes("accmag_data")) {
+            config.data.datasets[0].label = "roll (acc)";
+            config.data.datasets[1].label = "pitch (acc)";
+            config.data.datasets[2].label = "yaw (mag)";
+        } else if (sensor.localeCompare("compl_angles") === 0) {
+            config.data.datasets[0].label = "roll";
+            config.data.datasets[1].label = "pitch";
+            config.data.datasets[2].label = "yaw";
+        } else {
+            config.data.datasets[0].label = "X";
+            config.data.datasets[1].label = "Y";
+            config.data.datasets[2].label = "Z";
         }
 
         let lineChart = new Chart(context, config);
         removeData(lineChart);
-        updateConfigByMutating(lineChart, imuSelector.options[imuSelector.selectedIndex].text+" "+sensorSelector.options[sensorSelector.selectedIndex].text);
+        updateConfigByMutating(lineChart, $("#IMU-selector option:selected").text() + " - " + $("#sensor-selector option:selected").text());
 
-        $.get("/api/devices/" + device_uuid + "/" + select.value, async function (data) {
+        $.get("/api/devices/" + device_uuid + "/" + registration_id, function (data) {
             let reg_data = JSON.parse(data)[0].data;
             for (let i = 0; i < reg_data.length; i++) {
                 let d = reg_data[i];
-                console.log(d);
-                time = new Date(d.time)
-                config.data.labels.push(time.toLocaleTimeString()+"."+time.getMilliseconds());
+                let time = new Date(d.time);
+                config.data.labels.push(time.toLocaleTimeString() + "." + time.getMilliseconds());
                 config.data.datasets[0].data.push(d[IMU][sensor].x);
                 config.data.datasets[1].data.push(d[IMU][sensor].y);
                 config.data.datasets[2].data.push(d[IMU][sensor].z);
-                lineChart.update();
-
-                await sleep(100);
+                //await sleep(100);
             }
+            lineChart.update();
         });
     }
+
     function removeData(chart) {
         chart.data.labels.pop();
         chart.data.datasets.forEach((dataset) => {

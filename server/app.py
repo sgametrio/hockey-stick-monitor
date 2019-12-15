@@ -1,3 +1,4 @@
+import os
 import threading
 from datetime import datetime
 import random
@@ -19,8 +20,14 @@ app.config['TEMPLATES_AUTO_RELOAD'] = True
 
 from flask_pymongo import PyMongo
 
-app.config["MONGO_URI"] = "mongodb+srv://ste:embeneciccie@hockeydb-nmtoi.mongodb.net/test?retryWrites=true&w=majority"
+# app.config["MONGO_URI"] = "mongodb+srv://ste:embeneciccie@hockeydb-nmtoi.mongodb.net/test?retryWrites=true&w=majority"
+app.config['MONGO_DBNAME'] = 'sticks'  # name of database on mongo
+app.config["MONGO_URI"] = "mongodb://127.0.0.1:27017/sticks"
 mongo = PyMongo(app)
+
+from threading import Lock
+lock = Lock()
+
 
 import json
 from bson import ObjectId
@@ -32,28 +39,6 @@ class JSONEncoder(json.JSONEncoder):
         if isinstance(o, ObjectId):
             return str(o)
         return json.JSONEncoder.default(self, o)
-
-
-class ComplementaryFilter:
-    def __init__(self, dt, gyro_sensitivity=65.536):
-        self.gyro_s = gyro_sensitivity
-        self.dt = dt
-        self.roll, self.pitch, self.yaw = 0., 0., 0.
-
-    def step(self, sample):
-        Ax, Ay, Az, mx, my, mz, wx, wy, wz = sample
-
-        A_roll = np.arctan2(Ay, Az)
-        A_pitch = np.arctan(-Ax, np.sqrt(Ay ** 2 + Az ** 2))
-
-        Mx = mx * np.cos(A_pitch) + mz * np.sin(A_pitch)
-        My = mx * np.sin(A_roll) * np.sin(A_pitch) + \
-             my * np.cos(A_roll) - mz * np.sin(A_roll) * np.cos(A_pitch)
-        M_yaw = np.arctan2(My, Mx)
-
-        # roll = 0.98 * (CF_angle + gyro_data * t) + 0.02 * acc_data
-
-        return self.roll, self.pitch, self.yaw
 
 
 def h5store(filename, df, **kwargs):
@@ -83,8 +68,6 @@ positions = ['top', 'mid', 'bot']
 sensors = ['acc', 'mag', 'gyr']
 columns = [f"{s}_{pos}" for s in sensors for pos in positions]
 extended_columns = [f"{IMU}_{axis}" for IMU in columns for axis in "xyz"]
-print(extended_columns)
-
 
 class Collector:
     def __init__(self):
@@ -133,7 +116,8 @@ class Collector:
 
         data = np.moveaxis(data, 2, 0)
 
-        self.connected_devices[uuid].save(data)
+        with lock:
+            self.connected_devices[uuid].save(data)
 
         return 'Data uploaded successfully'
 
@@ -165,7 +149,7 @@ class Device:
     def enable(self, start_time, mgap):
         self.active = True
         self.start_time = start_time
-        self.mgap = mgap
+        self.mgap = mgap * 0.001
 
     def disable(self):
         self.active = False
@@ -175,40 +159,68 @@ class Device:
         print(f"Data: {data.shape}")
 
         assert len(sensors) == 3, 'Change the code, this works only for acc-mag-gyr IMUs'
-        acc_mag = []
+        acc_mag_arct = []
         # timestep * position * (sensor * axis)
-        tuple_view = data.reshape(-1, len(positions), len(sensors) * 3)
+        # tuple_view = data.reshape(-1, len(positions), len(sensors), 3)
         for i in range(len(positions)):
-            Ax, Ay, Az, mx, my, mz, wx, wy, wz = np.moveaxis(tuple_view[:, i, :], 0, 1)
-            A_roll = np.arctan2(Ay, Az)
-            A_pitch = np.arctan(-Ax / np.sqrt(Ay ** 2 + Az ** 2))
+            A, M = np.moveaxis(data[:, i, :2, :], 0, 1)
 
-            Mx = mx * np.cos(A_pitch) + mz * np.sin(A_pitch)
-            My = mx * np.sin(A_roll) * np.sin(A_pitch) + \
-                 my * np.cos(A_roll) - mz * np.sin(A_roll) * np.cos(A_pitch)
-            M_yaw = np.arctan2(My, Mx)
+            ax, ay, az = np.moveaxis(A, 0, 1)
+            roll = np.arctan2(ay, az) * 180. / np.pi
+            pitch = np.arctan2(-ax, np.sqrt(ay ** 2 + az ** 2)) * 180. / np.pi
 
-            result = np.c_[A_roll, A_pitch, M_yaw]
-            print(f"{np.moveaxis(tuple_view[:, i, :], 0, 1).shape} -> {result.shape}")
-            acc_mag.append(result)
-        angles = np.moveaxis(np.array(acc_mag), 1, 0)
-        angles = np.moveaxis(angles[..., np.newaxis], -1, 2)
+            norm = np.linalg.norm(A, axis=1)[:, np.newaxis]
+            A_norm = A / norm
+            pitchA = -np.arcsin(A_norm[:, 0])
+            Ay = A[:, 1] / np.cos(pitchA)
+            rollA = np.arcsin(Ay / norm[:, 0])
+
+            print(M.shape)
+            #M = M - M[0]
+            M = M / np.linalg.norm(M, axis=1)[:, np.newaxis]
+            mx, my, mz = np.moveaxis(M, 0, 1)
+            my = -my
+
+            Mx = mx * np.cos(pitchA) + mz * np.sin(pitchA)
+            My = mx * np.sin(rollA) * np.sin(pitchA) + \
+                 my * np.cos(rollA) - mz * np.sin(rollA) * np.cos(pitchA)
+            #Mx = mx * np.cos(pitch) + mz * np.sin(pitch)
+            #My = mx * np.sin(roll) * np.sin(pitch) + \
+            #     my * np.cos(roll) - mz * np.sin(roll) * np.cos(pitch)
+            M_yaw = np.arctan2(-My, Mx)
+
+            #M_yaw[M_yaw > 180] -= 360
+            #M_yaw[M_yaw < -180] += 360
+
+            result_arct = np.c_[roll, pitch, M_yaw]
+
+            print(f"{data[:, i, :2, :].shape} -> {result_arct.shape}")
+            acc_mag_arct.append(result_arct)
+
+
+        angles_arct = np.moveaxis(np.array(acc_mag_arct), 1, 0)
+        angles_arct = np.moveaxis(angles_arct[..., np.newaxis], -1, 2)
+        angles_arct[np.isnan(angles_arct)] = 0.
+
         # timestep * position * 1 * axis
-        print(f"Angles: {angles.shape}")
+        print(f"Angles: {angles_arct.shape}")
 
-        complete = np.concatenate([data, angles], axis=2)
+        complete = np.concatenate([data, angles_arct], axis=2)
         print(f"Final (acc-mag): {complete.shape}")
 
         CF_angles = []
         for pos in range(len(positions)):
             # 0 acc, 1 mag, 2 gyr, 3 compensated acc+mag
-            CF_angle = [complete[0, pos, 2] * self.mgap]
-            for i in range(1, tuple_view.shape[0]):
-                CF_angle.append(0.98 * (CF_angle[-1] + complete[0, pos, 2] * self.mgap) + 0.02 * complete[0, pos, 3])
-            CF_angles.append(CF_angle)
+            CF_angle = [[0, 0, 0]]
+            for i in range(data.shape[0]):
+                roll, pitch = CF_angle[-1][:2] + complete[i, pos, 2, :2] * self.mgap
+                yaw = 0.98 * (CF_angle[-1][2] + complete[i, pos, 2, 2] * self.mgap) + 0.02 * complete[i, pos, 3, 2]
+                CF_angle.append([roll, pitch, yaw])
+            CF_angles.append(CF_angle[1:])
 
         refined_angles = np.moveaxis(np.array(CF_angles), 1, 0)
         refined_angles = np.moveaxis(refined_angles[..., np.newaxis], -1, 2)
+        # refined_angles[np.isnan(refined_angles)] = 0
         # timestep * position * 1 * axis
         print(f"Refined angles: {refined_angles.shape}")
 
@@ -225,7 +237,7 @@ class Device:
                  **{pos:
                         {sens:
                              {axis: row[idp][ids][iax] for iax, axis in enumerate("xyz")}
-                         for ids, sens in enumerate(sensors + ['accmag_data', 'compl_angles'])}
+                         for ids, sens in enumerate(sensors + ['accmag_data_tan', 'compl_angles'])}
                     for idp, pos in enumerate(positions)}}
                 for idr, row in enumerate(complete)]
 
@@ -243,6 +255,7 @@ collector = Collector()
 
 # @app.before_first_request
 # def activate_job():
+#    print(mongo)
 #     def run_job():
 #         while True:
 #             print("Run recurring task")
@@ -308,4 +321,4 @@ def chart_data():
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(threaded=False)
