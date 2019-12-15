@@ -22,10 +22,21 @@
     </div>
     <div class="row">
         <div class="col-12">
-            <select id="sensor-selector">
+            <select id="IMU-selector" onchange="document.getElementById('reg-selector').dispatchEvent(new Event('change'))">
                 <option value="top" selected>Top</option>
                 <option value="mid">Mid</option>
                 <option value="bot">Bottom</option>
+            </select>
+        </div>
+    </div>
+    <div class="row">
+        <div class="col-12">
+            <select id="sensor-selector" onchange="document.getElementById('reg-selector').dispatchEvent(new Event('change'))">
+                <option value="acc" selected>Accelerator</option>
+                <option value="mag">Magnetometer</option>
+                <option value="gyr">Gyroscope</option>
+                <option value="accmag_data">Magnetometer compensated Accelleration</option>
+                <option value="compl_angles">Complimentary Filtered Angles</option>
             </select>
         </div>
     </div>
@@ -105,8 +116,6 @@
         }
     };
 
-    const context = document.getElementById('canvas').getContext('2d');
-
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -156,6 +165,8 @@
 
             let fakeChange = new Event('change');
             regSelector.dispatchEvent(fakeChange);
+
+
         });
     }
 
@@ -165,25 +176,59 @@
         let devSelector = document.getElementById("uuid-selector");
         let device_uuid = devSelector.options[devSelector.selectedIndex].text;
 
+        let imuSelector = document.getElementById("IMU-selector");
+        let IMU = imuSelector.options[imuSelector.selectedIndex].value;
+
         let sensorSelector = document.getElementById("sensor-selector");
         let sensor = sensorSelector.options[sensorSelector.selectedIndex].value;
 
-        console.log(sensor);
-        const lineChart = new Chart(context, config);
+        console.log(IMU, sensor);
+
+        $('#canvas').remove();
+        $('.card-body').append('<canvas id="canvas"><canvas>');
+
+        let context = document.getElementById('canvas').getContext('2d');
+
+        let custom_config = config;
+        if (sensor.localeCompare("accmag_data")){
+            custom_config.data.datasets[0].label = "pitch (acc)";
+            custom_config.data.datasets[1].label = "roll (acc)";
+            custom_config.data.datasets[2].label = "yaw (mag)";
+        }
+
+        let lineChart = new Chart(context, config);
+        removeData(lineChart);
+        updateConfigByMutating(lineChart, imuSelector.options[imuSelector.selectedIndex].text+" "+sensorSelector.options[sensorSelector.selectedIndex].text);
+
         $.get("/api/devices/" + device_uuid + "/" + select.value, async function (data) {
             let reg_data = JSON.parse(data)[0].data;
             for (let i = 0; i < reg_data.length; i++) {
                 let d = reg_data[i];
                 console.log(d);
-                config.data.labels.push(d.time);
-                config.data.datasets[0].data.push(d[sensor].compl_angles.x);
-                config.data.datasets[1].data.push(d[sensor].compl_angles.y);
-                config.data.datasets[2].data.push(d[sensor].compl_angles.z);
+                time = new Date(d.time)
+                config.data.labels.push(time.toLocaleTimeString()+"."+time.getMilliseconds());
+                config.data.datasets[0].data.push(d[IMU][sensor].x);
+                config.data.datasets[1].data.push(d[IMU][sensor].y);
+                config.data.datasets[2].data.push(d[IMU][sensor].z);
                 lineChart.update();
 
-                await sleep(300);
+                await sleep(100);
             }
         });
+    }
+    function removeData(chart) {
+        chart.data.labels.pop();
+        chart.data.datasets.forEach((dataset) => {
+            dataset.data = [];
+            dataset.data = [];
+        });
+        chart.data.labels = [];
+        chart.update();
+    }
+
+    function updateConfigByMutating(chart, title) {
+        chart.options.title.text = title;
+        chart.update();
     }
 
 

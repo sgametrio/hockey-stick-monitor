@@ -3,7 +3,8 @@ import Vue from "vue"
 class Api {
    constructor() {
       // this.BASE_URL = "http://10.63.128.73:5000/api"
-      this.BASE_URL = "https://en9px191x4ne9.x.pipedream.net"
+      this.BASE_URL = "http://0.0.0.0:5000/api"
+      // this.BASE_URL = "https://en9px191x4ne9.x.pipedream.net"
    }
 
    async sendData(payload, arduino) {
