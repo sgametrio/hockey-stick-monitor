@@ -7,8 +7,11 @@
       :stroke-width="stroke"
       stroke-linecap="round"
       stroke-linejoin="round"
+      xmlns="http://www.w3.org/2000/svg"
+      xmlns:xlink="http://www.w3.org/1999/xlink"
+      version="1.1"
    >
-      <use :xlink:href="path"/>
+      <use :href="path"/>
    </svg>
 </template>
 
@@ -25,6 +28,12 @@ export default {
       },
       fill: {
          type: String
+      }
+   },
+   watch: {
+      icon: function(old, latest) {
+         console.log(old, latest)
+         console.log(this.path)
       }
    },
    computed: {

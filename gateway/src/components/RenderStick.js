@@ -14,7 +14,7 @@ class RenderStick {
    constructor({width = 400, height = 400}) {
       this.ThreeJS = ThreeJS
       this.scene = new this.ThreeJS.Scene()
-      this.camera = new this.ThreeJS.PerspectiveCamera(120, width / height, 0.1, 10000)
+      this.camera = new this.ThreeJS.PerspectiveCamera(110, width / height, 0.1, 10000)
       // TODO: resize canvas on resize window
       // TODO: add material to stick
       this.renderer = new this.ThreeJS.WebGLRenderer({ alpha: true, antialias: true })
