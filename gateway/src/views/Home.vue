@@ -166,7 +166,6 @@ export default {
         this.showCounter = false
         await management.writeValue(start)
         this.recordings.splice(i, 1, true)
-        this.renderStick()
         await Api.startCommunication({
           "mgap": 10,
           "time": (new Date()).getTime()  
