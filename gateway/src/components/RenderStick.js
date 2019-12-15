@@ -60,19 +60,21 @@ class RenderStick {
       })
    }
 
-   rotateAndRender([x, y, z]) {
+   // rotateAndRender([x, y, z]) {
+   rotateAndRender(whole_reads) {
       // const RAD_TO_DEG = 57.29578
-      // let acc = whole_reads["acc_top"]
-      // let gyr = whole_reads["gyr_top"]
-      // let mag = whole_reads["mag_top"]
+      let acc = whole_reads["acc_top"]
+      let gyr = whole_reads["gyr_top"]
+      let mag = whole_reads["mag_top"]
+      let [x, y, z] = latest(acc)
       
       // let latest_acc = latest(acc).map(v => v*0.0174533)
       // let roll = Math.atan2(latest_acc[1], latest_acc[2]) //* RAD_TO_DEG
       // let pitch = Math.atan2(-latest_acc[0], Math.sqrt(latest_acc[1]**2 + latest_acc[2]**2)) //* RAD_TO_DEG
 
-      // let a_norm = l2norm(latest_acc)
-      // let pitchA = -Math.asin(latest_acc[0] / a_norm)
-      // let rollA = Math.asin(latest_acc[1] / Math.cos(pitchA) / a_norm)
+      // let a_norm = l2norm(acc)
+      // let pitchA = -Math.asin(x / a_norm)
+      // let rollA = Math.asin(y / Math.cos(pitchA) / a_norm)
 
       // let latest_mag = latest(mag) 
       // let m_norm = l2norm(latest_mag)
@@ -96,6 +98,7 @@ class RenderStick {
       z *= 0.0174533
       let pitch = Math.atan2((-x), Math.sqrt(y*y + z*z))
       let roll = Math.atan2(y, z)
+      // this.stick.rotation.x = yaw
       this.stick.rotation.y = pitch
       this.stick.rotation.z = roll
       this.renderer.render(this.scene, this.camera)

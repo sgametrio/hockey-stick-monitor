@@ -73,7 +73,7 @@ export default {
   },
   data: function () {
     return {
-      N_MEASUREMENTS: 20,
+      N_MEASUREMENTS: 60,
       arduinos: [],
       serviceUuid: "6a0a5c16-0dcf-11ea-8d71-362b9e155667",
       managementUuid: "5143d572-0dcf-11ea-8d71-362b9e155667",
@@ -111,12 +111,15 @@ export default {
   beforeDestroy() {
     // ensure that I remove event listeners on characteristics
     for (let [characteristic, i] of this.valuesCharacteristics) {
-      characteristic.removeEventListener('characteristicvaluechanged', async (event) => {
-        await this.readValues(event, i)
-      }, false)
+      try {
+        characteristic.removeEventListener('characteristicvaluechanged', this.readDataCharacteristic, false)
+      } catch (exception) {}   
     }
   },
   methods: {
+    async readDataCharacteristic (event) {
+      await this.readValues(event, 0)
+    },
     async connectToArduino() {
       this.loading = true
 
@@ -157,9 +160,7 @@ export default {
       const management = this.managements[i]
       try {
         await values.startNotifications()
-        values.addEventListener('characteristicvaluechanged', async (event) => {
-          await this.readValues(event, i)
-        }, false)
+        values.addEventListener('characteristicvaluechanged', this.readDataCharacteristic, false)
         // communicate to start reading data
         const start = Uint8Array.from([0x01])
         this.counter = 0
@@ -191,9 +192,7 @@ export default {
     async sendEndingSequence(i) {
       const values = this.valuesCharacteristics[i]
       await values.stopNotifications()
-      values.removeEventListener('characteristicvaluechanged', async (event) => {
-          await this.newValueToRead(event, i)
-      }, false)
+      values.removeEventListener('characteristicvaluechanged', this.readDataCharacteristic, false)
       // TODO: investigate why it's not sequential
       if (this.valuesFirst > 0) {
         const weeeeee = await this.sendSensorsData(/* i */)
@@ -266,9 +265,9 @@ export default {
       requestAnimationFrame(this.animate)
       const latest = this.latestXYZAccTop()
       if (latest.length === 3) {
-        RenderStick.rotateAndRender(latest)
+        // RenderStick.rotateAndRender(latest)
       }
-      // RenderStick.rotateAndRender(this.sequence[0])
+      RenderStick.rotateAndRender(this.sequence[0])
     },
     latestXYZAccTop(/* i */) {
       return this.latest_values["acc_top"]
