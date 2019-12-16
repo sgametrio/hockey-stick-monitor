@@ -11,7 +11,7 @@
         font-family: Lato, Arial;
         color: #fff;
         padding: 20px;
-        background-color: black;
+        //background-color: black;
     }
 
     .vertical-center {
@@ -20,9 +20,12 @@
 
         display: flex;
         align-items: center;
-        background-color: black;
+        //background-color: black;
     }
 
+    .card-body {
+        //background-color: black;
+    }
     </style>
 </head>
 <body>
@@ -55,7 +58,7 @@
         <div class="row">
             <div class="col-12">
                 <div class="card">
-                    <div class="card-body" style="background-color: black;">
+                    <div class="card-body">
                         <canvas id="canvas"></canvas>
                     </div>
                 </div>
@@ -110,7 +113,7 @@
             legend: {
                 position: 'top',
                 labels: {
-                    fontColor: 'white'
+                    //fontColor: 'white'
                 }
             },
             showLines: false,
@@ -127,7 +130,7 @@
             title: {
                 display: true,
                 text: 'Data',
-                fontColor: 'white'
+                //fontColor: 'white'
             },
             tooltips: {
                 mode: 'index',
@@ -139,13 +142,13 @@
                 animationDuration: 0 // duration of animations when hovering an item
             },
             pointLabels: {
-                fontColor: 'white' // labels around the edge like 'Running'
+                //fontColor: 'white' // labels around the edge like 'Running'
             },
             gridLines: {
-                color: 'rgba(255, 255, 255, 0.2)'
+                //color: 'rgba(255, 255, 255, 0.2)'
             },
             angleLines: {
-                color: 'white' // lines radiating from the center
+                //color: 'white' // lines radiating from the center
             },
             scales: {
                 xAxes: [{
@@ -163,7 +166,7 @@
                     }
                 }],
                 ticks: {
-                    fontColor: 'white', // labels such as 10, 20, etc
+                    //fontColor: 'white', // labels such as 10, 20, etc
                     showLabelBackdrop: false // hide square behind text
                 },
             }
@@ -171,13 +174,14 @@
     };
 
     // A plugin to draw the background color
+    /*
     Chart.plugins.register({
         beforeDraw: function (chartInstance) {
             var ctx = chartInstance.chart.ctx;
             ctx.fillStyle = 'black';
             ctx.fillRect(0, 0, chartInstance.chart.width, chartInstance.chart.height);
         }
-    })
+    });*/
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
