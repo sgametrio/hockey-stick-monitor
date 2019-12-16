@@ -11,7 +11,7 @@
       xmlns:xlink="http://www.w3.org/1999/xlink"
       version="1.1"
    >
-      <use :href="path"/>
+      <use :href="path" :key="path"/>
    </svg>
 </template>
 
@@ -31,14 +31,10 @@ export default {
       }
    },
    watch: {
-      icon: function(old, latest) {
-         console.log(old, latest)
-         console.log(this.path)
-      }
    },
    computed: {
       path () {
-         return `./img/icons/feather-sprite.svg#${this.icon}`
+         return `img/icons/feather-sprite.svg#${this.icon}`
       },
       fillString () {
          if (!this.fill) return "none"
