@@ -30,15 +30,7 @@ lock = Lock()
 
 
 import json
-from bson import ObjectId
 from bson.json_util import dumps
-
-
-class JSONEncoder(json.JSONEncoder):
-    def default(self, o):
-        if isinstance(o, ObjectId):
-            return str(o)
-        return json.JSONEncoder.default(self, o)
 
 
 def h5store(filename, df, **kwargs):
@@ -175,8 +167,6 @@ class Device:
             Ay = A[:, 1] / np.cos(pitchA)
             rollA = np.arcsin(Ay / norm[:, 0])
 
-            print(M.shape)
-            #M = M - M[0]
             M = M / np.linalg.norm(M, axis=1)[:, np.newaxis]
             mx, my, mz = np.moveaxis(M, 0, 1)
             my = -my
@@ -184,9 +174,6 @@ class Device:
             Mx = mx * np.cos(pitchA) + mz * np.sin(pitchA)
             My = mx * np.sin(rollA) * np.sin(pitchA) + \
                  my * np.cos(rollA) - mz * np.sin(rollA) * np.cos(pitchA)
-            #Mx = mx * np.cos(pitch) + mz * np.sin(pitch)
-            #My = mx * np.sin(roll) * np.sin(pitch) + \
-            #     my * np.cos(roll) - mz * np.sin(roll) * np.cos(pitch)
             M_yaw = np.arctan2(-My, Mx)
 
             #M_yaw[M_yaw > 180] -= 360
@@ -233,11 +220,12 @@ class Device:
             for sample in range(len(packet)):
                 timings.append(timings[-1] + self.mgap)
 
+        new_insights = ['accmag_data_tan', 'compl_angles']
         data = [{**{"time": timings[idr]},
                  **{pos:
                         {sens:
                              {axis: row[idp][ids][iax] for iax, axis in enumerate("xyz")}
-                         for ids, sens in enumerate(sensors + ['accmag_data_tan', 'compl_angles'])}
+                         for ids, sens in enumerate(sensors + new_insights)}
                     for idp, pos in enumerate(positions)}}
                 for idr, row in enumerate(complete)]
 
