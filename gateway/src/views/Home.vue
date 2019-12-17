@@ -125,6 +125,7 @@ export default {
 
       try {
         log('Requesting Bluetooth Device...')
+        const n_arduino = this.arduinos.length
         const arduino = await navigator.bluetooth.requestDevice({
           filters: [{
             services: ["6a0a5c16-0dcf-11ea-8d71-362b9e155667"]
@@ -132,6 +133,8 @@ export default {
           // acceptAllDevices: true,
           // optionalServices: ["6a0a5c16-0dcf-11ea-8d71-362b9e155667"]
         })
+
+        
       
         log('Connecting to GATT Server...')
         const server = await arduino.gatt.connect();
@@ -149,6 +152,15 @@ export default {
         this.recordings.push(false)
         this.values.push(JSON.parse(JSON.stringify(sensors)))
         this.sequence.push(JSON.parse(JSON.stringify(sensors)))
+
+        arduino.addEventListener('gattserverdisconnected', () => {
+          this.arduinos.splice(n_arduino)
+          this.managements.splice(n_arduino)
+          this.valuesCharacteristics.splice(n_arduino)
+          this.recordings.splice(n_arduino)
+          this.values.splice(n_arduino)
+          this.sequence.splice(n_arduino)
+        })
       } catch (error) {
         log("Error connecting to arduino: " + error)
       } finally {
