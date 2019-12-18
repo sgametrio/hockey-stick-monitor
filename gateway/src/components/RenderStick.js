@@ -27,13 +27,13 @@ class RenderStick {
       this.shadowLight.shadow.camera.far = 3500
 
       this.shadowLightHelper = new this.ThreeJS.DirectionalLightHelper(this.shadowLight, 500)
-
+      
 
       var geometry = new this.ThreeJS.PlaneGeometry(10000, 10000)
       var material = new this.ThreeJS.MeshBasicMaterial( {color: 0xeeeeee, side: this.ThreeJS.DoubleSide} )
       this.plane = new this.ThreeJS.Mesh( geometry, material );
       this.plane.rotation.x = Math.PI / 2
-      this.plane.position.y = -300
+      this.plane.position.y = -500
       this.plane.receiveShadow = true
       this.scene.add( this.plane );
       // this.stickLight = new this.ThreeJS.DirectionalLight(0xffffff, 1)
@@ -47,8 +47,9 @@ class RenderStick {
       this.stick = null
       let loader = new this.ThreeJS.OBJLoader()
       loader.load("model/hockey_stick.obj", (stick) => {
-         console.log(stick)
          this.stick = stick
+         this.axesHelper = new this.ThreeJS.AxesHelper(1000);
+         this.stick.add(this.axesHelper)
          this.stick.position.set(0, 0, 0)
          // this.stick.rotation.z = Math.PI / 2
          this.camera.position.set(200, 1100, 400)
@@ -57,6 +58,7 @@ class RenderStick {
          this.camera.up.set(0, 1, -1)
          this.camera.lookAt(this.stick.position)
          this.scene.add(this.stick)
+         
       })
    }
 
@@ -66,7 +68,7 @@ class RenderStick {
       let acc = whole_reads["acc_top"]
       let gyr = whole_reads["gyr_top"]
       let mag = whole_reads["mag_top"]
-      let [x, y, z] = latest(acc)
+      
       
       // let latest_acc = latest(acc).map(v => v*0.0174533)
       // let roll = Math.atan2(latest_acc[1], latest_acc[2]) //* RAD_TO_DEG
@@ -93,16 +95,43 @@ class RenderStick {
       //    yaw += 360
       // }
       
+
+      // https://stanford.edu/class/ee267/lectures/lecture9.pdf
+      // let acc_latest = latest(acc)
+      // let acc_norm = l2norm(acc_latest)
+      // // Normalize
+      // let [ax, ay, az] = acc_latest.map(v => v / acc_norm)
+      
+      // // teta_z is pitch that maps x axis on my model
+      // const teta_z = -1.0 * -Math.atan2(-ax, ay)  // I add minus because of rendering. This is in radians [-pi, pi] 
+      // // teta_x is roll that maps z axis on my model
+      // const teta_x = -Math.atan2(az, Math.sign(ay)*Math.sqrt(ax**2 + ay**2))  // in radians [-pi, pi]
+      // this.stick.rotation.x = teta_z
+      // // this.stick.rotation.y = teta_z // apply roll_z to y because of the model render
+      // this.stick.rotation.z = teta_x
+
+      // Following arduino dashboard method
+      let [x, y, z] = latest(acc)
       x *= 0.0174533 * -1.0
       y *= 0.0174533
       z *= 0.0174533
       let pitch = Math.atan2((-x), Math.sqrt(y*y + z*z))
       let roll = Math.atan2(y, z)
-      // this.stick.rotation.x = yaw
       this.stick.rotation.y = pitch
       this.stick.rotation.z = roll
       this.renderer.render(this.scene, this.camera)
-   }  
+   }
+
+   rotateAndRenderGyro([x, y, z]) {
+      // Use only gyroscope to compute angles
+      x *= 0.0174533
+      y *= 0.0174533
+      z *= 0.0174533
+      this.stick.rotation.x = y
+      this.stick.rotation.y = -z
+      this.stick.rotation.z = x
+      this.renderer.render(this.scene, this.camera)
+   }
 
    // animate() {
    //    requestAnimationFrame(this.animate)

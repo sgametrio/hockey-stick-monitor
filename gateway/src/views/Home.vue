@@ -26,7 +26,8 @@
                     <color-svg :class="[ (recordings[i]) ? 'border-gray-100 text-gray-500 bg-gray-100' : 'border-teal-200 text-teal-500 bg-teal-100 hover:bg-teal-200']"
                               class="border p-1 pl-2 rounded-full h-8 w-8 shadow" stroke=2 fill=true 
                               icon="play" @click.native="startRecording(i)"/>
-                    <span class="text-xs mx-1" v-if="showCounter">{{counter}}</span>
+                    <!-- <span class="text-xs mx-1" v-if="showCounter">{{counter}}</span> -->
+                    <input class="text-xs" type="button" :value="(calibration) ? 'calibrating' : 'measuring'" @click="calibration = !calibration"/>
                     <color-svg :class="[ (!recordings[i]) ? 'border-gray-100 text-gray-500 bg-gray-100' : 'border-yellow-200 text-yellow-500 bg-yellow-100 hover:bg-yellow-200']"
                               class="border p-1 rounded-full h-8 w-8 shadow" stroke=1 fill=true 
                               icon="pause" @click.native="stopRecording(i)"/>
@@ -49,7 +50,8 @@
           </div>
           <div class="lg:w-3/5" v-if="recordings[0]">
             <div id="canvas"></div>
-            <input type="button" @click="renderStick" value="render"/>
+            <input type="button" @click="renderStick" value="render with accel"/>
+            <input type="button" @click="renderStickGyro" value="render with gyro"/>
           </div>
         </div>
       </div>
@@ -73,7 +75,9 @@ export default {
   },
   data: function () {
     return {
-      N_MEASUREMENTS: 60,
+      N_MEASUREMENTS: 20,
+      DELTA_T: 0.015,
+      calibration: true,
       arduinos: [],
       serviceUuid: "6a0a5c16-0dcf-11ea-8d71-362b9e155667",
       managementUuid: "5143d572-0dcf-11ea-8d71-362b9e155667",
@@ -86,6 +90,7 @@ export default {
       sequence: [],
       latest_values: {"acc_top": [0,0,0]},
       latest_read: {"acc_top": [0,0,0]},
+      latest_rotations: {"gyr_top": [0,0,0]},
       recordings: [],
       loading: false,
       counter: 0,
@@ -220,7 +225,7 @@ export default {
       const messages = packet.buffer.slice(0, packet.byteLength - 1)
       const packet_id = packet.getUint8(packet.byteLength - 1)
       // console.log(packet)
-      console.log(packet_id)
+      // console.log(packet_id)
       // Check if it's last packet
       if (packet.getUint8(0) === 255 && packet.getUint8(1) === 255 && packet.getUint8(2) === 255 && packet.getUint8(3) === 255) {
         // Send remaining data and then send to server the stop sequence
@@ -229,7 +234,7 @@ export default {
         return
       }
 
-      for (let m = 0; m < messages.byteLength; m += 54) {  // for every message
+      for (let m = 0; m < messages.byteLength; m += 54) {  // for every measurement
         for (let s = 0; s < (54 / 6); s++) {  // for every sensor read
           const xyz = new Int16Array(messages.slice(m + s*6, m + s*6 + 6), 0, 3)
           // console.log("Received buffer: ", xyz.buffer)
@@ -243,9 +248,11 @@ export default {
           this.latest_values[mapping[s]] = [...computed.values()]
           this.latest_read[mapping[s]] = [...xyz.values()]
         }
+        // Integrate rotations with delta_t
+        const offset = [-0.5, 0.8, -0.3]
+        this.latest_rotations["gyr_top"] = this.latest_rotations["gyr_top"].map((v, i) => v + (this.latest_values["gyr_top"][i] - offset[i]) * this.DELTA_T)
+        // console.log(this.latest_rotations["gyr_top"])
       }
-      // console.log(this.latest_read["mag_top"])
-      // console.log(this.latest_values["mag_top"])
     },
     sendSensorsData (/* i */) {
       // TODO: be sure that we do not lose some values in doing this dump stuff
@@ -264,25 +271,32 @@ export default {
         }
         send[position][sensor] = JSON.parse(JSON.stringify(value))
       }
-      return Api.sendData({
-        ...send
-      }, this.arduinos[0].name)
+      if (this.calibration) 
+        return Api.calibrate({
+          ...send
+        }, this.arduinos[0].name)
+      else
+        return Api.sendData({
+          ...send
+        }, this.arduinos[0].name)
     },
     renderStick () {
       this.renderer = RenderStick.getRenderer()
       this.$el.querySelector("#canvas").appendChild(this.renderer.domElement)
       this.animate()
     },
+    renderStickGyro () {
+      this.renderer = RenderStick.getRenderer()
+      this.$el.querySelector("#canvas").appendChild(this.renderer.domElement)
+      this.animateGyro()
+    },
     animate() {
       requestAnimationFrame(this.animate)
-      const latest = this.latestXYZAccTop()
-      if (latest.length === 3) {
-        // RenderStick.rotateAndRender(latest)
-      }
       RenderStick.rotateAndRender(this.sequence[0])
     },
-    latestXYZAccTop(/* i */) {
-      return this.latest_values["acc_top"]
+    animateGyro() {
+      requestAnimationFrame(this.animateGyro)
+      RenderStick.rotateAndRenderGyro(this.latest_rotations["gyr_top"])
     }
   }
 }
