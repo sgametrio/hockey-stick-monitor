@@ -1,18 +1,13 @@
-import os
-import threading
-from datetime import datetime
-import random
-from bson.json_util import dumps, RELAXED_JSON_OPTIONS
 import time
-import numpy as np
-import pandas as pd
-import queue
 
+import numpy as np
+from pyquaternion import Quaternion
+import pandas as pd
 from flask import Flask, request, Response, render_template
 
 app = Flask(__name__)
 
-from flask_cors import CORS, cross_origin
+from flask_cors import CORS
 
 cors = CORS(app)
 app.config['CORS_HEADERS'] = 'Content-Type'
@@ -26,8 +21,8 @@ app.config["MONGO_URI"] = "mongodb://127.0.0.1:27017/sticks"
 mongo = PyMongo(app)
 
 from threading import Lock
-lock = Lock()
 
+lock = Lock()
 
 import json
 from bson.json_util import dumps
@@ -60,6 +55,7 @@ positions = ['top', 'mid', 'bot']
 sensors = ['acc', 'mag', 'gyr']
 columns = [f"{s}_{pos}" for s in sensors for pos in positions]
 extended_columns = [f"{IMU}_{axis}" for IMU in columns for axis in "xyz"]
+
 
 class Collector:
     def __init__(self):
@@ -118,7 +114,7 @@ class Collector:
 
         if uuid in self.connected_devices:
             if self.connected_devices[uuid].active:
-                self.connected_devices[uuid].disable()
+                self.connected_devices[uuid].disable
             else:
                 return f"Device <{uuid}> is already disabled, check your code"
 
@@ -143,6 +139,7 @@ class Device:
         self.start_time = start_time
         self.mgap = mgap * 0.001
 
+    @property
     def disable(self):
         self.active = False
 
@@ -150,10 +147,11 @@ class Device:
         # timestep * position * sensor * axis
         print(f"Data: {data.shape}")
 
+        # my_array[:, [0, 1]] = my_array[:, [1, 0]]
+
         assert len(sensors) == 3, 'Change the code, this works only for acc-mag-gyr IMUs'
         acc_mag_arct = []
         # timestep * position * (sensor * axis)
-        # tuple_view = data.reshape(-1, len(positions), len(sensors), 3)
         for i in range(len(positions)):
             A, M = np.moveaxis(data[:, i, :2, :], 0, 1)
 
@@ -176,14 +174,13 @@ class Device:
                  my * np.cos(rollA) - mz * np.sin(rollA) * np.cos(pitchA)
             M_yaw = np.arctan2(-My, Mx)
 
-            #M_yaw[M_yaw > 180] -= 360
-            #M_yaw[M_yaw < -180] += 360
+            # M_yaw[M_yaw > 180] -= 360
+            # M_yaw[M_yaw < -180] += 360
 
             result_arct = np.c_[roll, pitch, M_yaw]
 
             print(f"{data[:, i, :2, :].shape} -> {result_arct.shape}")
             acc_mag_arct.append(result_arct)
-
 
         angles_arct = np.moveaxis(np.array(acc_mag_arct), 1, 0)
         angles_arct = np.moveaxis(angles_arct[..., np.newaxis], -1, 2)
@@ -214,13 +211,87 @@ class Device:
         complete = np.concatenate([complete, refined_angles], axis=2)
         print(f"Final (acc-mag-gyr): {complete.shape}")
 
+        a_tildes = []
+        q_omegas = []
+        q_cs = []
+        for pos in range(len(positions)):
+            A, M, W = np.moveaxis(data[:, pos, :3, :], 0, 1)
+
+            acc_norm = np.linalg.norm(A, axis=1)[:, np.newaxis]
+            An = A / acc_norm
+
+            # Pitch and roll are obtainable with acceleration
+            ax, ay, az = np.moveaxis(An, 0, 1)
+            theta_x = -np.arctan2(az, np.sign(ay) * np.sqrt(ax ** 2 + ay ** 2))
+            theta_z = -np.arctan2(-ax, ay)
+
+            # Let's try to compensate with magnetometer
+            # x is z, y is x, z is y
+            pitch = -np.arcsin(An[:, 2])
+            roll = np.arcsin(A[:, 0] / np.cos(pitch) / acc_norm[:, 0])
+            M = M / np.linalg.norm(M, axis=1)[:, np.newaxis]
+            mx, my, mz = np.moveaxis(M, 0, 1)
+            mx = -mx
+            Mz = mz * np.cos(pitch) + my * np.sin(pitch)
+            Mx = mz * np.sin(roll) * np.sin(pitch) + \
+                 mx * np.cos(roll) - my * np.sin(roll) * np.cos(pitch)
+            M_yaw = np.arctan2(-Mx, Mz)
+            a_tilde = np.c_[theta_x, M_yaw, theta_z]
+            a_tildes.append(a_tilde)
+
+            # Let's start to integrate with quats
+            W_norm = np.linalg.norm(W, axis=1)[:, np.newaxis]
+            W = W / W_norm
+
+            # 3 axis gyro integration
+            q_omega = [Quaternion(angle=0, axis=[1, 0, 0])]  # Rotation from body to world frame
+            for i in range(len(W)):
+                q_omega.append(q_omega[-1] * Quaternion(angle=self.mgap * W_norm[i], axis=W[i]))
+
+            q_omegas.append([q.yaw_pitch_roll for q in q_omega[1:]])
+
+            # Computing the tilt correction quaternion
+            q_world = []
+            for i in range(len(q_omega[:-1])):
+                # TODO: a tilde o acc. normale?
+                q = q_omega[i] * Quaternion((0, *a_tilde[i])) * q_omega[i].conjugate
+                q_world.append(q.normalised.imaginary)
+            q_world = np.array(q_world)
+
+            vx, vy, vz = np.moveaxis(q_world, 0, 1)
+
+            n = np.c_[-vz, [0] * len(vx), vx]
+            n = n / np.linalg.norm(n, axis=1)[:, np.newaxis]
+
+            # Applying a complementary filter
+            q_c = []
+            for i in range(len(q_omega[1:])):
+                q = Quaternion(angle=0.02 * np.arccos(vy[i]), axis=n[i]) * q_omega[i]
+                q_c.append(q.yaw_pitch_roll)
+
+            print(f"{data[:, pos, :, :].shape} -> {np.array(q_c).shape}")
+
+            q_cs.append(q_c)
+
+        a_tildes = np.moveaxis(np.array(a_tildes), 1, 0)
+        a_tildes = np.moveaxis(a_tildes[..., np.newaxis], -1, 2)
+        complete = np.concatenate([complete, a_tildes], axis=2)
+
+        q_omegas = np.moveaxis(np.array(q_omegas), 1, 0)
+        q_omegas = np.moveaxis(q_omegas[..., np.newaxis], -1, 2)
+        complete = np.concatenate([complete, q_omegas], axis=2)
+
+        q_cs = np.moveaxis(np.array(q_cs), 1, 0)
+        q_cs = np.moveaxis(q_cs[..., np.newaxis], -1, 2)
+        complete = np.concatenate([complete, q_cs], axis=2)
+
         # This supports different inter-packets size
         timings = [self.start_time]
         for pid, packet in enumerate(self.realtime_data):
             for sample in range(len(packet)):
                 timings.append(timings[-1] + self.mgap)
 
-        new_insights = ['accmag_data_tan', 'compl_angles']
+        new_insights = ['accmag_data_tan', 'compl_angles', 'a_tildes', 'q_omegas', 'q_cs']
         data = [{**{"time": timings[idr]},
                  **{pos:
                         {sens:
