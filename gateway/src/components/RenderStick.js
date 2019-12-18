@@ -33,7 +33,7 @@ class RenderStick {
       var material = new this.ThreeJS.MeshBasicMaterial( {color: 0xeeeeee, side: this.ThreeJS.DoubleSide} )
       this.plane = new this.ThreeJS.Mesh( geometry, material );
       this.plane.rotation.x = Math.PI / 2
-      this.plane.position.y = -500
+      this.plane.position.y = -1200
       this.plane.receiveShadow = true
       this.scene.add( this.plane );
       // this.stickLight = new this.ThreeJS.DirectionalLight(0xffffff, 1)
@@ -45,19 +45,23 @@ class RenderStick {
       this.renderer.shadowMap.enabled = true
       this.renderer.shadowMap.renderReverseSided = false
       this.stick = null
+      
       let loader = new this.ThreeJS.OBJLoader()
       loader.load("model/hockey_stick.obj", (stick) => {
          this.stick = stick
          this.axesHelper = new this.ThreeJS.AxesHelper(1000);
-         this.stick.add(this.axesHelper)
-         this.stick.position.set(0, 0, 0)
+         this.stick.position.set(0, 0, 700)
+         this.stickPivot = new this.ThreeJS.Object3D()
+         this.stickPivot.position.set(0, 0, 0)
+         this.stickPivot.add(this.stick)
+         this.stickPivot.add(this.axesHelper)
          // this.stick.rotation.z = Math.PI / 2
          this.camera.position.set(200, 1100, 400)
          // this.camera.rotateOnAxis(new this.ThreeJS.Vector3(1,0,0), Math.PI / 2)
          // this.camera.rotateX(Math.PI / 2)
          this.camera.up.set(0, 1, -1)
          this.camera.lookAt(this.stick.position)
-         this.scene.add(this.stick)
+         this.scene.add(this.stickPivot)
          
       })
    }
@@ -127,9 +131,9 @@ class RenderStick {
       x *= 0.0174533
       y *= 0.0174533
       z *= 0.0174533
-      this.stick.rotation.x = y
-      this.stick.rotation.y = -z
-      this.stick.rotation.z = x
+      this.stickPivot.rotation.x = y
+      this.stickPivot.rotation.y = -z
+      this.stickPivot.rotation.z = x
       this.renderer.render(this.scene, this.camera)
    }
 

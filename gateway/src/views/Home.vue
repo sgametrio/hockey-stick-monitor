@@ -27,7 +27,7 @@
                               class="border p-1 pl-2 rounded-full h-8 w-8 shadow" stroke=2 fill=true 
                               icon="play" @click.native="startRecording(i)"/>
                     <!-- <span class="text-xs mx-1" v-if="showCounter">{{counter}}</span> -->
-                    <input class="text-xs" type="button" :value="(calibration) ? 'calibrating' : 'measuring'" @click="calibration = !calibration"/>
+                    <input class="text-xs" type="button" :value="(calibration) ? 'cal\'ing' : 'mea\'ing'" @click="calibration = !calibration"/>
                     <color-svg :class="[ (!recordings[i]) ? 'border-gray-100 text-gray-500 bg-gray-100' : 'border-yellow-200 text-yellow-500 bg-yellow-100 hover:bg-yellow-200']"
                               class="border p-1 rounded-full h-8 w-8 shadow" stroke=1 fill=true 
                               icon="pause" @click.native="stopRecording(i)"/>
@@ -50,8 +50,8 @@
           </div>
           <div class="lg:w-3/5" v-if="recordings[0]">
             <div id="canvas"></div>
-            <input type="button" @click="renderStick" value="render with accel"/>
-            <input type="button" @click="renderStickGyro" value="render with gyro"/>
+            <!-- <input type="button" @click="renderStick" value="render with accel"/> -->
+            <input class="p-2 border-blue-600 bg-blue-300" type="button" @click="renderStickGyro" value="render with gyro"/>
           </div>
         </div>
       </div>
@@ -222,6 +222,7 @@ export default {
       // a single message is 3*2*3*3 = 54 byte (x,y,z)*(2 byte)*(3 sensor)*(3 IMU)
       // messages contains N message + 1 byte of packet_id (at the end)
       const packet = event.target.value
+      // alert(packet.byteLength)
       const messages = packet.buffer.slice(0, packet.byteLength - 1)
       const packet_id = packet.getUint8(packet.byteLength - 1)
       // console.log(packet)
