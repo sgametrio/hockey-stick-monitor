@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 from pyquaternion import Quaternion
+from scipy import integrate
 import pandas as pd
 from flask import Flask, request, Response, render_template
 
@@ -114,36 +115,70 @@ class Collector:
 
         if uuid in self.connected_devices:
             if self.connected_devices[uuid].active:
-                self.connected_devices[uuid].disable
+                self.connected_devices[uuid].disable()
             else:
                 return f"Device <{uuid}> is already disabled, check your code"
 
         return "Registration stopped"
 
+    def calibrate(self, uuid, content):
+        connection_error = 'Please, enable the device with /start before sending data'
+        assert uuid in self.connected_devices, connection_error
+        assert self.connected_devices[uuid].active, connection_error
+
+        assert type(content) == dict, f'Data received cannot be parsed to dictionary ({type(content)})'
+        assert content.keys() == set(positions), \
+            "Malformed dictionary, check keys"
+        assert all([type(content[pos]) is dict for pos in positions]), \
+            "Sensor data are not in dict format"
+
+        assert all([type(content[pos][sens]) is list for sens in sensors for pos in positions]), \
+            "Sensor data are not in list format"
+
+        data = np.array([[content[pos][sens] for sens in sensors] for pos in positions])
+
+        assert all([sensor_data.shape[-1] == 3 for sensor_data in data]), 'Each sensor should have 3 axis on the ' \
+                                                                          'second dimension '
+        assert len(set([sensor_data.shape for sensor_data in data])) == 1, 'Different shape for sensor readings'
+
+        data = np.moveaxis(data, 2, 0)
+
+        with lock:
+            self.connected_devices[uuid].save_cal(data)
+
+        return 'Data uploaded successfully'
+
 
 class Device:
     def __init__(self, uuid, start_time, mgap):
         self.uuid = uuid
-        self.start_time = start_time
+        self.start_time = start_time * 0.001
         self.active = True
         # self.data_history = queue.Queue()
         self.data_history = []  # block * packets * sensors * timestep * axis
         self.realtime_data = []  # packets * sensors * timestep * axis
+        self.calib_data = []  # packets * sensors * timestep * axis
+
         self.mgap = mgap
 
     def save(self, data):
         self.realtime_data.append(data)
+
+    def save_cal(self, data):
+        self.calib_data.append(data)
 
     def enable(self, start_time, mgap):
         self.active = True
         self.start_time = start_time
         self.mgap = mgap * 0.001
 
-    @property
     def disable(self):
         self.active = False
 
         data = np.vstack(self.realtime_data)
+        if len(self.calib_data) > 0:
+            cal_data = np.vstack(self.calib_data)
+
         # timestep * position * sensor * axis
         print(f"Data: {data.shape}")
 
@@ -211,11 +246,35 @@ class Device:
         complete = np.concatenate([complete, refined_angles], axis=2)
         print(f"Final (acc-mag-gyr): {complete.shape}")
 
+        # This supports different inter-packets size
+        timings = [self.start_time]
+        for pid, packet in enumerate(self.realtime_data):
+            for sample in range(len(packet)):
+                timings.append(timings[-1] + self.mgap)
+
         a_tildes = []
         q_omegas = []
         q_cs = []
+        dirty = []
+        lib = []
         for pos in range(len(positions)):
-            A, M, W = np.moveaxis(data[:, pos, :3, :], 0, 1)
+            d = data[:, pos, :, :]  # timestep * sensor *  axis
+            A, M, W = np.moveaxis(d, 0, 1)
+
+            from fusion import Fusion
+            f = Fusion(lambda start, end: self.mgap)
+
+            if len(self.calib_data) > 0:
+                M_cal = np.moveaxis(cal_data[:, pos, 1, :], 0, 1)
+                f.calibrate(M_cal)
+            fus = []
+            for i, (accel, gyro, mag) in enumerate(zip(A, W, M)):
+                f.update(accel, gyro, mag, ts=timings[i])
+                fus.append([f.pitch, f.heading, f.roll])
+            print(f.beta)
+            lib.append(fus)
+
+            dirty.append(integrate.cumtrapz(W, dx=self.mgap, axis=0, initial=0))
 
             acc_norm = np.linalg.norm(A, axis=1)[:, np.newaxis]
             An = A / acc_norm
@@ -273,25 +332,28 @@ class Device:
 
             q_cs.append(q_c)
 
+        lib = np.moveaxis(np.array(lib), 1, 0)
+        lib = np.moveaxis(lib[..., np.newaxis], -1, 2)
+        complete = np.concatenate([complete, lib], axis=2)
+
+        dirty = np.moveaxis(np.array(dirty), 1, 0)
+        dirty = np.moveaxis(dirty[..., np.newaxis], -1, 2)
+        complete = np.concatenate([complete, dirty], axis=2)
+
         a_tildes = np.moveaxis(np.array(a_tildes), 1, 0)
         a_tildes = np.moveaxis(a_tildes[..., np.newaxis], -1, 2)
         complete = np.concatenate([complete, a_tildes], axis=2)
 
         q_omegas = np.moveaxis(np.array(q_omegas), 1, 0)
         q_omegas = np.moveaxis(q_omegas[..., np.newaxis], -1, 2)
+        q_omegas[np.isnan(q_omegas)] = 0
         complete = np.concatenate([complete, q_omegas], axis=2)
 
         q_cs = np.moveaxis(np.array(q_cs), 1, 0)
         q_cs = np.moveaxis(q_cs[..., np.newaxis], -1, 2)
         complete = np.concatenate([complete, q_cs], axis=2)
 
-        # This supports different inter-packets size
-        timings = [self.start_time]
-        for pid, packet in enumerate(self.realtime_data):
-            for sample in range(len(packet)):
-                timings.append(timings[-1] + self.mgap)
-
-        new_insights = ['accmag_data_tan', 'compl_angles', 'a_tildes', 'q_omegas', 'q_cs']
+        new_insights = ['accmag_data_tan', 'compl_angles', 'lib', 'dirty', 'a_tildes', 'q_omegas', 'q_cs']
         data = [{**{"time": timings[idr]},
                  **{pos:
                         {sens:
@@ -307,6 +369,7 @@ class Device:
                       }}, upsert=True)
 
         self.realtime_data = []
+        self.calib_data = []
 
 
 collector = Collector()
@@ -338,6 +401,10 @@ def start_record(uuid):
 def add_message(uuid):
     return collector.upload(uuid, request.json)
 
+
+@app.route('/api/calibrate/<uuid>', methods=['GET', 'POST'])
+def calibrate(uuid):
+    return collector.calibrate(uuid, request.json)
 
 @app.route('/api/stop/<uuid>', methods=['GET', 'POST'])
 def stop_record(uuid):
