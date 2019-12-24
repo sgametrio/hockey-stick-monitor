@@ -20,13 +20,12 @@
             <div class="flex flex-row flex-wrap items-center w-full">
               <div v-for="(arduino, i) in arduinos" :key="i" class="mr-2">
                 <div class="h-52 w-32 shadow rounded-lg flex flex-col items-center justify-center">
-                  <img src="img/icons/arduino-nano.svg" class="h-20 w-20 bg-gray-200 rounded-full shadow border-2 border-gray-200"/>
+                  <img alt="Arduino connected" src="img/icons/arduino-nano.svg" class="h-20 w-20 bg-gray-200 rounded-full shadow border-2 border-gray-200"/>
                   <span class="mt-4 text-xs break-words w-24">{{ arduino.name }}</span>
                   <div class="mt-2 flex flex-row justify-between items-center w-24">
                     <color-svg :class="[ (recordings[i]) ? 'border-gray-100 text-gray-500 bg-gray-100' : 'border-teal-200 text-teal-500 bg-teal-100 hover:bg-teal-200']"
                               class="border p-1 pl-2 rounded-full h-8 w-8 shadow" stroke=2 fill=true 
                               icon="play" @click.native="startRecording(i)"/>
-                    <!-- <span class="text-xs mx-1" v-if="showCounter">{{counter}}</span> -->
                     <input class="text-xs" type="button" :value="(calibration) ? 'cal\'ing' : 'mea\'ing'" @click="calibration = !calibration"/>
                     <color-svg :class="[ (!recordings[i]) ? 'border-gray-100 text-gray-500 bg-gray-100' : 'border-yellow-200 text-yellow-500 bg-yellow-100 hover:bg-yellow-200']"
                               class="border p-1 rounded-full h-8 w-8 shadow" stroke=1 fill=true 
@@ -50,7 +49,6 @@
           </div>
           <div class="lg:w-3/5" v-if="recordings[0]">
             <div id="canvas"></div>
-            <!-- <input type="button" @click="renderStick" value="render with accel"/> -->
             <input class="p-2 border-blue-600 bg-blue-300" type="button" @click="renderStickGyro" value="render with gyro"/>
           </div>
         </div>
@@ -115,7 +113,7 @@ export default {
   mounted() {},
   beforeDestroy() {
     // ensure that I remove event listeners on characteristics
-    for (let [characteristic, i] of this.valuesCharacteristics) {
+    for (let characteristic of this.valuesCharacteristics) {
       try {
         characteristic.removeEventListener('characteristicvaluechanged', this.readDataCharacteristic, false)
       } catch (exception) {}   
@@ -212,9 +210,9 @@ export default {
       values.removeEventListener('characteristicvaluechanged', this.readDataCharacteristic, false)
       // TODO: investigate why it's not sequential
       if (this.valuesFirst > 0) {
-        const weeeeee = await this.sendSensorsData(/* i */)
+        await this.sendSensorsData(/* i */)
       }
-      const stopped = await Api.stopCommunication({}, this.arduinos[i].name)
+      await Api.stopCommunication({}, this.arduinos[i].name)
     },
     async readValues(event, i) {
       this.counter++
@@ -224,7 +222,7 @@ export default {
       const packet = event.target.value
       // alert(packet.byteLength)
       const messages = packet.buffer.slice(0, packet.byteLength - 1)
-      const packet_id = packet.getUint8(packet.byteLength - 1)
+      // const packet_id = packet.getUint8(packet.byteLength - 1)
       // console.log(packet)
       // console.log(packet_id)
       // Check if it's last packet
@@ -240,7 +238,6 @@ export default {
           const xyz = new Int16Array(messages.slice(m + s*6, m + s*6 + 6), 0, 3)
           // console.log("Received buffer: ", xyz.buffer)
           let computed = new Float32Array(3)
-          let read = new Int16Array(3)
           for (let x = 0; x < 3; x++) {  // convert from int16 to float according to fullscale
             computed[x] = convert_raw[mapping[s]](xyz[x])
           }
@@ -252,7 +249,6 @@ export default {
         // Integrate rotations with delta_t
         const offset = [-0.5, 0.8, -0.3]
         this.latest_rotations["gyr_top"] = this.latest_rotations["gyr_top"].map((v, i) => v + (this.latest_values["gyr_top"][i] - offset[i]) * this.DELTA_T)
-        // console.log(this.latest_rotations["gyr_top"])
       }
     },
     sendSensorsData (/* i */) {

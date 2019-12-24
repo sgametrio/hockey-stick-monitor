@@ -70,8 +70,8 @@ class RenderStick {
    rotateAndRender(whole_reads) {
       // const RAD_TO_DEG = 57.29578
       let acc = whole_reads["acc_top"]
-      let gyr = whole_reads["gyr_top"]
-      let mag = whole_reads["mag_top"]
+      // let gyr = whole_reads["gyr_top"]
+      // let mag = whole_reads["mag_top"]
       
       
       // let latest_acc = latest(acc).map(v => v*0.0174533)
